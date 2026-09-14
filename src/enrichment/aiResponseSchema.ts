@@ -25,16 +25,34 @@ export const skillDetailSchema = z
     type: safeStringNullable(50),
     condition: safeStringNullable(SAFE_STRING_MAX),
     effect: safeStringNullable(SAFE_STRING_MAX),
-    value: z.union([safeString(50), z.number().finite(), z.null()]),
+    // HP条件による分岐等、実際のスキルには単純な倍率表記に収まらないものがあるため
+    // condition/effectと同じ上限にする（長文の攻略記事をそのまま転記させる意図ではない）
+    value: z.union([safeString(SAFE_STRING_MAX), z.number().finite(), z.null()]),
   })
   .nullable();
 
+/**
+ * ChatGPTの回答がプレーンなURLではなく "[url](url)" 形式のMarkdownリンクとして
+ * 返ってくることがある。その場合はリンク先(括弧内)を実際のURLとして扱う
+ * （表示テキスト部分の内容に関わらず、括弧内がhttp/httpsであることを検証する）。
+ */
+function extractMarkdownLinkUrl(value: string): string {
+  const match = value.match(/^\[([^[\]]*)\]\(([^()]+)\)$/);
+  if (match && /^https?:\/\//i.test(match[2])) {
+    return match[2];
+  }
+  return value;
+}
+
 export const sourceUrlSchema = z.object({
-  url: z
-    .string()
-    .max(2000)
-    .refine((u) => /^https?:\/\//i.test(u), "URLはhttp/httpsのみ許可されます")
-    .refine(noHtml, "HTMLタグを含む文字列は許可されません"),
+  url: z.preprocess(
+    (v) => (typeof v === "string" ? extractMarkdownLinkUrl(v) : v),
+    z
+      .string()
+      .max(2000)
+      .refine((u) => /^https?:\/\//i.test(u), "URLはhttp/httpsのみ許可されます")
+      .refine(noHtml, "HTMLタグを含む文字列は許可されません"),
+  ),
   title: safeStringNullable(NAME_MAX),
 });
 

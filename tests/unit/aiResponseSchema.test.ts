@@ -136,4 +136,40 @@ describe("validateAiResponseSchema", () => {
     const result = validateAiResponseSchema(payload);
     expect(result.ok).toBe(true);
   });
+
+  it("HP条件による分岐等、50文字を超えるskill.valueも許容する（実在のスキルで発生する）", () => {
+    const payload = validPayload();
+    const longValue =
+      "HP85％以上：毎ターン1800雷撃。HP85％未満～35％以上：毎ターン1100雷撃＋1000回復。HP35％未満：毎ターン1400雷撃＋通常・特殊ダメージを80％に軽減。";
+    (payload.pieces[0] as { skill: Record<string, unknown> }).skill.value = longValue;
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.pieces[0].skill?.value).toBe(longValue);
+  });
+
+  it("skill.valueが異常に長い(300文字超)場合は拒否する", () => {
+    const payload = validPayload();
+    (payload.pieces[0] as { skill: Record<string, unknown> }).skill.value = "あ".repeat(301);
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(false);
+  });
+
+  it("sourceUrls.urlがMarkdownリンク形式([url](url))でもリンク先を抽出して受理する", () => {
+    const payload = validPayload();
+    (payload.pieces[0] as Record<string, unknown>).sourceUrls = [
+      { url: "[https://game8.jp/othellonia/312281](https://game8.jp/othellonia/312281)", title: "評価記事" },
+    ];
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.pieces[0].sourceUrls?.[0].url).toBe("https://game8.jp/othellonia/312281");
+  });
+
+  it("Markdownリンクの括弧内がjavascript:等の危険なスキームなら拒否する", () => {
+    const payload = validPayload();
+    (payload.pieces[0] as Record<string, unknown>).sourceUrls = [
+      { url: "[クリック](javascript:alert(1))", title: null },
+    ];
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(false);
+  });
 });

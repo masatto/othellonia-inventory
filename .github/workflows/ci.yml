@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -b
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build (GitHub Pages base path)
+        run: npm run build:pages
+
+      - name: 公開禁止ファイル検査（生アイコン・大量画像混入チェック）
+        run: npm run check:no-raw-icons
+
+      - name: 秘密情報検査
+        run: npm run check:secrets
+
+      - name: PWA設定検査
+        run: npm run check:pwa
+
+      - name: 公開物(dist)安全性テスト
+        run: npm run test
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E smoke tests (iPhone viewport)
+        run: npx playwright test
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload build (for inspection, excludes any raw icons by design)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-preview
+          path: dist/
+          retention-days: 3

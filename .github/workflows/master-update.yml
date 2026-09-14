@@ -1,0 +1,77 @@
+name: Master Data Update (manual)
+
+# 駒マスターデータの更新はPWA本体のデプロイと分離し、手動実行を基本とする（仕様書16章・17章）。
+# 攻略サイトからの自動取得(fetchFromSource)は、利用規約・robots.txt等の確認が
+# 完了するまで有効化しない（README・tools/master-builder/README.md を参照）。
+# このワークフローは現状、既知データからの再生成と整合性検査のみを行い、
+# 差分をPull Requestとして提示する（mainへの自動直接マージは行わない）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "実行理由（差分レポートに記録されます）"
+        required: false
+        default: "manual regeneration"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: "master-update"
+  cancel-in-progress: false
+
+jobs:
+  update-master:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: 既知データからマスター/アイコンを再生成
+        run: |
+          npm run master:seed
+          npm run master:icons
+
+      - name: 生アイコンが残っていないことを検査
+        run: npm run check:no-raw-icons
+
+      - name: 秘密情報検査
+        run: npm run check:secrets
+
+      - name: 単体テスト
+        run: npm run test
+
+      - name: 差分の確認
+        id: diff
+        run: |
+          if git diff --quiet -- public/master public/icons; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull Requestを作成（差分がある場合のみ）
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(master): update master data (${{ github.event.inputs.reason }})"
+          title: "駒マスターデータ更新"
+          body: |
+            `workflow_dispatch` による駒マスターデータの手動更新です。
+            実行理由: ${{ github.event.inputs.reason }}
+
+            - 生アイコンが含まれていないことを確認済みです（`check:no-raw-icons`）
+            - 秘密情報検査を通過しています
+            - 単体テストを通過しています
+
+            このPRは自動でmainへマージされません。内容を確認のうえマージしてください。
+          branch: automation/master-update
+          delete-branch: true

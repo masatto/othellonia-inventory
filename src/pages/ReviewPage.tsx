@@ -7,6 +7,7 @@ import { addLearnedFeature, getAllLearnedFeatures, putScanHistory } from "../db/
 import type { OwnedPiece, ReviewStatus, ScanHistoryRecord } from "../domain/types";
 import { getLatestScanHistory } from "../db/database";
 import { generateLocalPieceId } from "../domain/localPieceId";
+import { findSiblingDuplicate, type ResolvedSiblingCell } from "../recognition/matching";
 
 const MAX_LEARNED_SAMPLES_PER_PIECE = 5;
 /** この類似度以上の画像候補がある場合、新規仮登録の前に警告を表示する */
@@ -123,11 +124,18 @@ export function ReviewPage() {
     });
   }
 
-  /** マスタに無い駒を、ユーザー入力の仮称付きで新しい内部pieceIdとして仮登録する */
+  /**
+   * マスタに無い駒を、ユーザー入力の仮称付きで新しい内部pieceIdとして仮登録する。
+   * 名称未確認のまま保存する経路は廃止した（検索の手がかりが無いまま保存すると、
+   * 後のAI調査で正式名称にたどり着けず活用できないデータになってしまうため）。
+   * うろ覚えの略称・特徴の説明文でも構わないので、必ず何らかの仮称を入力させる。
+   */
   async function registerProvisionalPiece(cellIndex: number) {
     const name = provisionalName.trim();
     if (!name) {
-      alert("仮の名称を入力してください。名称が分からない場合は「不明駒として保存」を使ってください。");
+      alert(
+        "仮の名称を入力してください。正式名称が分からなくても、うろ覚えの略称や特徴の説明（例：赤い鬼のような見た目）で構いません。",
+      );
       return;
     }
     if (!confirmDespiteSimilarImage(cellIndex)) return;
@@ -135,18 +143,6 @@ export function ReviewPage() {
     const pieceId = generateLocalPieceId();
     const now = new Date().toISOString();
     await upsertLocalPiece({ pieceId, provisionalName: name, nameStatus: "provisional", createdAt: now, updatedAt: now });
-    await learnCellFeature(cellIndex, pieceId);
-    assignPiece(cellIndex, pieceId);
-    setProvisionalName("");
-  }
-
-  /** 名称が分からない駒を、名称未確認のまま新しい内部pieceIdとして保存する */
-  async function registerUnknownNamePiece(cellIndex: number) {
-    if (!confirmDespiteSimilarImage(cellIndex)) return;
-
-    const pieceId = generateLocalPieceId();
-    const now = new Date().toISOString();
-    await upsertLocalPiece({ pieceId, provisionalName: null, nameStatus: "unknown", createdAt: now, updatedAt: now });
     await learnCellFeature(cellIndex, pieceId);
     assignPiece(cellIndex, pieceId);
     setProvisionalName("");
@@ -263,6 +259,25 @@ export function ReviewPage() {
     return mergedInfoById.get(pieceId)?.fullName ?? masterById.get(pieceId)?.fullName ?? pieceId;
   }
 
+  /**
+   * 同一スキャン内で既に確定した他のマスと画像特徴量を比較し、被り（同じ駒の複数所持）
+   * の可能性が高い場合に提案する。学習済みデータベースへの照合とは独立して、
+   * 今回のスキャンだけで完結するため、初めて見る駒でも名前を入力せず一致させられる。
+   */
+  function siblingDuplicateMatch(currentCellIndex: number) {
+    const current = visibleResults.find((v) => v.cell.cellIndex === currentCellIndex);
+    if (!current) return null;
+    const resolvedSiblings: ResolvedSiblingCell[] = visibleResults
+      .filter(
+        (other) =>
+          other.cell.cellIndex !== currentCellIndex &&
+          other.assignedPieceId &&
+          (other.reviewStatus === "auto_confirmed" || other.reviewStatus === "user_confirmed"),
+      )
+      .map((other) => ({ cellIndex: other.cell.cellIndex, pieceId: other.assignedPieceId!, cell: other.cell }));
+    return findSiblingDuplicate(current.cell, resolvedSiblings);
+  }
+
   return (
     <div className="screen">
       <h1>認識結果</h1>
@@ -275,7 +290,10 @@ export function ReviewPage() {
         </div>
       </div>
 
-      {visibleResults.map((r) => (
+      {visibleResults.map((r) => {
+        const isResolved = r.reviewStatus === "auto_confirmed" || r.reviewStatus === "user_confirmed";
+        const siblingMatch = isResolved ? null : siblingDuplicateMatch(r.cell.cellIndex);
+        return (
         <div key={r.cell.cellIndex} className="card">
           <div style={{ display: "flex", gap: 12 }}>
             <img src={r.cell.thumbnailDataUrl} alt="" className="piece-thumb" />
@@ -294,7 +312,22 @@ export function ReviewPage() {
                 {r.assignedPieceId ? pieceDisplayName(r.assignedPieceId) : "未確定"}
               </div>
 
-              {r.reviewStatus !== "auto_confirmed" && r.reviewStatus !== "user_confirmed" && (
+              {siblingMatch && (
+                <div className="card" style={{ marginTop: 6, borderColor: "var(--success)" }}>
+                  <p className="muted">
+                    同じ画像内の「{pieceDisplayName(siblingMatch.pieceId)}」と非常によく似ています（類似度
+                    {Math.round(siblingMatch.score * 100)}%）。被り（同じ駒をもう1体所持）の可能性があります。
+                  </p>
+                  <button
+                    className="btn btn-primary btn-block"
+                    onClick={() => assignPiece(r.cell.cellIndex, siblingMatch.pieceId)}
+                  >
+                    同じ駒として登録する
+                  </button>
+                </div>
+              )}
+
+              {!isResolved && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                   {r.candidates.slice(0, 5).map((c) => (
                     <button
@@ -355,10 +388,12 @@ export function ReviewPage() {
                   </div>
 
                   <div className="card" style={{ marginTop: 8, borderColor: "var(--warning)" }}>
-                    <p className="muted">見つからない場合は、新しい駒として仮登録できます。</p>
+                    <p className="muted">
+                      見つからない場合は、新しい駒として仮登録できます。うろ覚えの略称や特徴の説明（例：赤い鬼のような見た目）でも構いません。名前を手がかりに、後でAI調査によって正式名称・効果を特定できます。
+                    </p>
                     <input
                       type="text"
-                      placeholder="仮の名称を入力（後でAI調査により正式名称に更新できます）"
+                      placeholder="仮の名称を入力（うろ覚え・特徴の説明でも可）"
                       value={provisionalName}
                       onChange={(e) => setProvisionalName(e.target.value)}
                     />
@@ -396,13 +431,6 @@ export function ReviewPage() {
                     >
                       ＋ 新しい駒として仮登録
                     </button>
-                    <button
-                      className="btn btn-block"
-                      style={{ marginTop: 6 }}
-                      onClick={() => registerUnknownNamePiece(r.cell.cellIndex)}
-                    >
-                      名称不明のまま「不明駒」として保存
-                    </button>
                   </div>
 
                   <button className="btn btn-block" style={{ marginTop: 8 }} onClick={() => setSearchOpenFor(null)}>
@@ -413,7 +441,8 @@ export function ReviewPage() {
             </div>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       <button className="btn btn-primary btn-block" onClick={saveAll} disabled={saving}>
         {saving ? "保存中..." : "所持駒として保存"}

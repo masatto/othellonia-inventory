@@ -280,7 +280,12 @@ export interface MergedPieceInfo {
 // マスタ未登録駒の仮登録（画像取込レビュー画面から新規登録）
 // ─────────────────────────────────────────────────────────────
 
-/** "provisional"=ユーザーが仮の名称を入力した, "unknown"=名称不明のまま保存した */
+/**
+ * "provisional"=ユーザーが仮の名称を入力した。
+ * "unknown"=名称不明のまま保存した（廃止済みの経路。検索の手がかりが無くAI調査で
+ * 特定できないため、現在のUIからは新規作成できない。過去に保存された既存データの
+ * 読み込み・バックアップ復元との後方互換のためだけに型として残している）。
+ */
 export type LocalPieceNameStatus = "provisional" | "unknown";
 
 /**
@@ -290,7 +295,7 @@ export type LocalPieceNameStatus = "provisional" | "unknown";
  */
 export interface LocalPieceRecord {
   pieceId: string;
-  /** ユーザーが検索の手がかりとして入力した仮の名称（不明駒の場合はnull） */
+  /** ユーザーが検索の手がかりとして入力した仮の名称（過去の"unknown"データの場合のみnull） */
   provisionalName: string | null;
   nameStatus: LocalPieceNameStatus;
   createdAt: string;

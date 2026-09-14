@@ -7,6 +7,18 @@ export interface ScoredCandidate {
   score: number; // 0-1, 高いほど類似
 }
 
+/** 2つの特徴量セット間の類似度(0-1、1が完全一致)。学習済みデータとの照合・
+ * 同一スキャン内の他マスとの照合の両方で共通して使う。 */
+export function cellSimilarity(a: CellFeatures, b: CellFeatures): number {
+  const pHashDist = hammingDistance(a.pHash, b.pHash);
+  const dHashDist = hammingDistance(a.dHash, b.dHash);
+  const aHashDist = hammingDistance(a.aHash, b.aHash);
+  // ハッシュは64bit想定なので距離を0-1の類似度に変換する
+  const hashSim = 1 - (pHashDist * 0.5 + dHashDist * 0.3 + aHashDist * 0.2) / 64;
+  const colorSim = histogramSimilarity(a.colorHistogram, b.colorHistogram);
+  return hashSim * 0.75 + colorSim * 0.25;
+}
+
 /**
  * 端末内で確認済みの学習済み特徴量（他の駒の攻略サイト画像は一切使わない）と
  * 検出セルの特徴量を比較し、候補をスコア順に返す。
@@ -14,13 +26,7 @@ export interface ScoredCandidate {
 export function rankCandidates(cell: CellFeatures, learned: LearnedFeature[]): ScoredCandidate[] {
   const scoresByPiece = new Map<string, number[]>();
   for (const feature of learned) {
-    const pHashDist = hammingDistance(cell.pHash, feature.pHash);
-    const dHashDist = hammingDistance(cell.dHash, feature.dHash);
-    const aHashDist = hammingDistance(cell.aHash, feature.aHash);
-    // ハッシュは64bit想定なので距離を0-1の類似度に変換する
-    const hashSim = 1 - (pHashDist * 0.5 + dHashDist * 0.3 + aHashDist * 0.2) / 64;
-    const colorSim = histogramSimilarity(cell.colorHistogram, feature.colorHistogram);
-    const score = hashSim * 0.75 + colorSim * 0.25;
+    const score = cellSimilarity(cell, feature);
     const arr = scoresByPiece.get(feature.pieceId) ?? [];
     arr.push(score);
     scoresByPiece.set(feature.pieceId, arr);
@@ -33,6 +39,41 @@ export function rankCandidates(cell: CellFeatures, learned: LearnedFeature[]): S
   }
   candidates.sort((a, b) => b.score - a.score);
   return candidates;
+}
+
+export interface ResolvedSiblingCell {
+  cellIndex: number;
+  pieceId: string;
+  cell: CellFeatures;
+}
+
+export interface SiblingDuplicateMatch {
+  pieceId: string;
+  score: number;
+  sourceCellIndex: number;
+}
+
+/** 同一スキャン内で確定済みの他マスと極めて近い場合に「被り」候補として提案する閾値 */
+export const SIBLING_DUPLICATE_MIN_SCORE = 0.9;
+
+/**
+ * 同一スクリーンショット内に同じ駒が複数写っている「被り」を検出する。
+ * 学習済みデータベース（過去に確認・保存した駒）とは独立に、今回のスキャンで
+ * 既に駒が確定した他のマスとだけ比較する。同じ駒であれば元画像がほぼ同一の
+ * ため、名前を入力しなくても高い類似度で一致させられる。
+ */
+export function findSiblingDuplicate(
+  cell: CellFeatures,
+  resolvedSiblings: ResolvedSiblingCell[],
+): SiblingDuplicateMatch | null {
+  let best: SiblingDuplicateMatch | null = null;
+  for (const sibling of resolvedSiblings) {
+    const score = cellSimilarity(cell, sibling.cell);
+    if (score >= SIBLING_DUPLICATE_MIN_SCORE && (!best || score > best.score)) {
+      best = { pieceId: sibling.pieceId, score, sourceCellIndex: sibling.cellIndex };
+    }
+  }
+  return best;
 }
 
 export interface ConfidenceResult {

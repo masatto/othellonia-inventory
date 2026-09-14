@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 /**
- * 初期駒マスター・初期所持駒データを生成するシードスクリプト。
+ * 個人用マスタJSON（アプリの「設定」画面からインポートできる形式）を
+ * 生成するサンプルスクリプト。
  *
  * このスクリプトはネットワークアクセスを一切行わない。
  * ユーザーが過去に目視確認した43種類＋過去申告4種類（画像未確認）の名称のみを
- * 既知データとして書き出す（仕様書21章）。属性・ランク・スキルなどの詳細事実は
- * このリポジトリ単体では確認できないため、確認できるまで "不明" として保持し、
- * 誤った事実を公開しないことを優先する。
+ * 既知データとして書き出す。属性・ランク・スキルなどの詳細事実はこのリポジトリ
+ * 単体では確認できないため、確認できるまで "不明" として保持し、誤った事実を
+ * 出力しないことを優先する。
  *
- * 攻略サイトから属性・ランク・スキル等の事実情報を取得して精緻化する場合は、
- * 別途 tools/master-builder/fetchFromSource.mjs （利用規約確認済みの環境でのみ実行）
- * を使う。画像そのものは取得・保存しない。
+ * 出力先は public/ 配下ではなく、このディレクトリ内のGit管理外フォルダ
+ * (tools/master-builder/output/) にする。生成したファイルはリポジトリへ
+ * コミットせず、アプリの「設定」画面からユーザー自身の端末へインポートして使う
+ * （マスタデータを公開リポジトリ・GitHub Pagesへ含めない方針のため）。
  *
  * 実行方法: node tools/master-builder/seedKnownPieces.mjs
  */
@@ -19,9 +21,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = join(__dirname, "..", "..", "public", "master");
+const OUT_DIR = join(__dirname, "output");
 
-/** [fullName, quantity, ownedStatus] */
+/** [fullName, quantity] （quantityは参考情報。所持駒として使う場合はバックアップ画面から別途登録する） */
 const CONFIRMED_PIECES = [
   ["［霊猫の愛娘］ミャオ", 1],
   ["［天位議会刺客］エルシーア", 1],
@@ -81,23 +83,20 @@ function parseName(rawName) {
   return { fullName, epithet: null, baseName: fullName };
 }
 
-const MASTER_VERSION = "seed-2026.09.14";
+const MASTER_VERSION = `personal-${new Date().toISOString().slice(0, 10)}`;
 const FEATURE_DATA_VERSION = 1;
 const now = new Date().toISOString();
 
-const masterPieces = [];
-const ownedSeed = [];
-
+const pieces = [];
 let seq = 1;
 function nextId() {
   return `sd${String(seq++).padStart(3, "0")}`;
 }
 
-for (const [rawName, quantity] of CONFIRMED_PIECES) {
+for (const [rawName] of [...CONFIRMED_PIECES, ...DECLARED_ONLY_PIECES.map((n) => [n])]) {
   const { fullName, epithet, baseName } = parseName(rawName);
-  const pieceId = nextId();
-  masterPieces.push({
-    pieceId,
+  pieces.push({
+    pieceId: nextId(),
     fullName,
     baseName,
     epithet,
@@ -112,85 +111,20 @@ for (const [rawName, quantity] of CONFIRMED_PIECES) {
     sourceUpdatedAt: null,
     featureDataVersion: FEATURE_DATA_VERSION,
     masterVersion: MASTER_VERSION,
-  });
-  ownedSeed.push({
-    pieceId,
-    quantity,
-    skillLevel: null,
-    ownedStatus: "confirmed",
-    recognitionConfidence: null,
-    confirmedByUser: true,
-    firstDetectedAt: now,
-    lastDetectedAt: now,
-    updatedAt: now,
-    memo: "初期移行データ（過去のスクリーンショット目視確認に基づく）",
   });
 }
 
-for (const rawName of DECLARED_ONLY_PIECES) {
-  const { fullName, epithet, baseName } = parseName(rawName);
-  const pieceId = nextId();
-  masterPieces.push({
-    pieceId,
-    fullName,
-    baseName,
-    epithet,
-    attribute: "不明",
-    rarity: "不明",
-    evolutionType: "不明",
-    skillName: null,
-    skillData: [],
-    comboSkillName: null,
-    comboSkillData: [],
-    sourceUrl: null,
-    sourceUpdatedAt: null,
-    featureDataVersion: FEATURE_DATA_VERSION,
-    masterVersion: MASTER_VERSION,
-  });
-  ownedSeed.push({
-    pieceId,
-    quantity: 1,
-    skillLevel: null,
-    ownedStatus: "declared_only",
-    recognitionConfidence: null,
-    confirmedByUser: true,
-    firstDetectedAt: now,
-    lastDetectedAt: now,
-    updatedAt: now,
-    memo: "過去申告・画像未確認",
-  });
-}
+const masterFile = {
+  schemaVersion: 1,
+  game: "逆転オセロニア",
+  masterVersion: MASTER_VERSION,
+  generatedAt: now,
+  pieces,
+};
 
 mkdirSync(OUT_DIR, { recursive: true });
+const outPath = join(OUT_DIR, "master-known-pieces.json");
+writeFileSync(outPath, JSON.stringify(masterFile, null, 2) + "\n");
 
-// 属性ごとに分割して配信する（仕様書10章「属性やランク単位で分割する」）。
-// 現時点では事実確認ができておらず全件「不明」のため 1 ファイルになるが、
-// tools/master-builder/fetchFromSource.mjs で属性が判明した駒から分割先が増える。
-const byAttribute = new Map();
-for (const piece of masterPieces) {
-  const list = byAttribute.get(piece.attribute) ?? [];
-  list.push(piece);
-  byAttribute.set(piece.attribute, list);
-}
-
-const ATTRIBUTE_FILE_SLUG = { 神: "god", 魔: "demon", 竜: "dragon", 不明: "unknown" };
-
-const files = [];
-for (const [attribute, pieces] of byAttribute) {
-  const slug = ATTRIBUTE_FILE_SLUG[attribute] ?? "unknown";
-  const filename = `pieces-${slug}.json`;
-  writeFileSync(join(OUT_DIR, filename), JSON.stringify(pieces, null, 2) + "\n");
-  files.push({ attribute, filename, count: pieces.length });
-}
-
-const manifest = {
-  masterVersion: MASTER_VERSION,
-  featureDataVersion: FEATURE_DATA_VERSION,
-  generatedAt: now,
-  totalPieces: masterPieces.length,
-  files,
-};
-writeFileSync(join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-writeFileSync(join(OUT_DIR, "owned-seed.json"), JSON.stringify(ownedSeed, null, 2) + "\n");
-
-console.log(`Wrote ${masterPieces.length} master pieces and ${ownedSeed.length} owned-seed records to ${OUT_DIR}`);
+console.log(`Wrote ${pieces.length} pieces to ${outPath}`);
+console.log("このファイルはコミットせず、アプリの「設定」画面からインポートしてください。");

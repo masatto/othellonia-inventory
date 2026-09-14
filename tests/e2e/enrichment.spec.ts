@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { seedMasterAndOwnedPiece } from "./testHelpers";
 
 const VALID_AI_RESPONSE = {
   schemaVersion: 1,
@@ -43,6 +44,17 @@ const INVALID_AI_RESPONSE_HTML = {
 };
 
 test.describe("駒情報補完機能", () => {
+  test.beforeEach(async ({ page }) => {
+    // マスタは公開リポジトリに含まれないため、対象駒(sd001)をマスタ+所持駒として
+    // 直接IndexedDBへ書き込んでから各テストを開始する
+    await seedMasterAndOwnedPiece(page, {
+      pieceId: "sd001",
+      fullName: "［霊猫の愛娘］ミャオ",
+      baseName: "ミャオ",
+      epithet: "霊猫の愛娘",
+    });
+  });
+
   test("情報不足一覧を開き、対象駒を選択してプロンプトを生成できる", async ({ page }) => {
     await page.goto("/#/enrichment");
     await expect(page.getByRole("heading", { name: "駒情報補完" })).toBeVisible();

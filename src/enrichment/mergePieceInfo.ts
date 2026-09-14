@@ -36,8 +36,8 @@ function masterSkillDetail(name: string | null, data: PieceMaster["skillData"]):
 
 /**
  * 駒マスターの初期値と端末内補完データを統合する。
- * 優先順位: 端末内補完データ → 公開マスターの初期値 → 不明(null)
- * 公開マスター(public/master/*.json)そのものは書き換えない。
+ * 優先順位: 端末内補完データ → インポート済みマスタの初期値 → 不明(null)
+ * インポート済みマスタ(IndexedDB: masterPiecesA/B)そのものは書き換えない。
  */
 export function mergePieceInfo(master: PieceMaster, local: LocalPieceMetadata | undefined): MergedPieceInfo {
   if (local) {

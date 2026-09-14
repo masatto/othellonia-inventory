@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { createBackup, migrateBackup } from "../../src/backup/backupSchema";
-import type { LocalPieceMetadata, LocalPieceRecord, OwnedPiece } from "../../src/domain/types";
+import type { LocalPieceMetadata, LocalPieceRecord, OwnedPiece, PieceMaster } from "../../src/domain/types";
+
+const sampleMaster: PieceMaster = {
+  pieceId: "sd001",
+  fullName: "［架空の異名］テストピース",
+  baseName: "テストピース",
+  epithet: "架空の異名",
+  attribute: "竜",
+  rarity: "S+",
+  evolutionType: "進化",
+  skillName: null,
+  skillData: [],
+  comboSkillName: null,
+  comboSkillData: [],
+  sourceUrl: null,
+  sourceUpdatedAt: null,
+  featureDataVersion: 1,
+  masterVersion: "test-1",
+};
 
 const samplePiece: OwnedPiece = {
   pieceId: "sd001",
@@ -140,6 +158,39 @@ describe("backupSchema", () => {
     const json = JSON.parse(JSON.stringify(backup));
     const { localPieces, warnings } = migrateBackup(json);
     expect(localPieces).toHaveLength(0);
+    expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  it("ユーザーデータのみのエクスポートにはmasterPiecesを含めない", () => {
+    const backup = createBackup([samplePiece], "seed-1", [sampleMetadata], []);
+    expect(backup.masterPieces).toBeUndefined();
+    expect(JSON.stringify(backup)).not.toContain("masterPieces");
+  });
+
+  it("完全バックアップ(マスタを含む)を作成し、そのまま往復復元できる", () => {
+    const backup = createBackup([samplePiece], "seed-1", [sampleMetadata], [], [sampleMaster]);
+    expect(backup.masterPieces).toHaveLength(1);
+    const json = JSON.parse(JSON.stringify(backup));
+    const { masterPieces, masterVersionAtExport, exportedAt, warnings } = migrateBackup(json);
+    expect(masterPieces).toHaveLength(1);
+    expect(masterPieces[0].pieceId).toBe("sd001");
+    expect(masterVersionAtExport).toBe("seed-1");
+    expect(exportedAt).toBe(backup.exportedAt);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("masterPiecesが無い旧バックアップでも復元でき、空配列になる（v3->v4マイグレーション）", () => {
+    const { masterPieces, warnings } = migrateBackup({ schemaVersion: 3, ownedPieces: [samplePiece] });
+    expect(masterPieces).toEqual([]);
+    expect(warnings.length).toBe(0);
+  });
+
+  it("不正なマスタデータ(HTMLタグ混入)は復元前に拒否し、警告付きでスキップする", () => {
+    const corrupted = { ...sampleMaster, fullName: "<script>alert(1)</script>" };
+    const backup = createBackup([samplePiece], "seed-1", [], [], [corrupted]);
+    const json = JSON.parse(JSON.stringify(backup));
+    const { masterPieces, warnings } = migrateBackup(json);
+    expect(masterPieces).toHaveLength(0);
     expect(warnings.length).toBeGreaterThan(0);
   });
 });

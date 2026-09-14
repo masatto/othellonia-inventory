@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForAppReady } from "./testHelpers";
 
 /**
  * 駒名候補検索（第1段階）のE2Eテスト。
@@ -7,8 +8,7 @@ import { test, expect, type Page } from "@playwright/test";
  * 動作することを検証する。
  */
 async function seedProvisionalPiece(page: Page, pieceId: string, provisionalName: string) {
-  await page.goto("/#/inventory");
-  await page.waitForSelector("text=ジェンイー", { timeout: 10_000 });
+  await waitForAppReady(page);
   await page.evaluate(
     ({ pieceId, provisionalName }) => {
       return new Promise<void>((resolve, reject) => {
@@ -48,7 +48,7 @@ async function seedProvisionalPiece(page: Page, pieceId: string, provisionalName
   // 反映されない（初回マウント時にしか読み込まないため）。reloadして
   // 最新のIndexedDBの内容から状態を組み直させる
   await page.reload();
-  await page.waitForSelector("text=ジェンイー", { timeout: 10_000 });
+  await waitForAppReady(page);
 }
 
 async function openEnrichmentAndSelect(page: Page, provisionalName: string) {

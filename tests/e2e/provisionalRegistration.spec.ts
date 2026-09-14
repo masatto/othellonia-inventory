@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForAppReady } from "./testHelpers";
 
 /**
  * 実際の画像認識パイプラインを経由せず、認識結果(scanHistory)を直接IndexedDBへ
@@ -44,10 +45,8 @@ function pendingScanRecord(cellIndex: number) {
 
 async function seedPendingScan(page: Page, cellIndex: number) {
   // IndexedDBのストア作成(getDb初回オープン)がこの時点で完了していることを保証するため、
-  // 初期データ投入が終わって初めて表示されるテキストを待つ（ホーム画面の見出しは
-  // DBオープン完了前から表示されるため、直接IndexedDBへ書き込むタイミングとして使えない）
-  await page.goto("/#/inventory");
-  await page.waitForSelector("text=ジェンイー", { timeout: 10_000 });
+  // 実際の画面が描画される（ローディングゲートが外れる）まで待つ
+  await waitForAppReady(page);
   await page.evaluate((record) => {
     return new Promise<void>((resolve, reject) => {
       const req = indexedDB.open("othellonia-inventory");

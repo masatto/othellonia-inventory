@@ -16,11 +16,12 @@ test.describe("基本画面表示", () => {
     await expect(input).toHaveAttribute("accept", "image/*");
   });
 
-  test("所持駒一覧に初期データが表示される", async ({ page }) => {
+  test("マスタ未登録でも所持駒一覧が正常に表示される（空の状態）", async ({ page }) => {
+    // マスタは公開リポジトリに含まれないため、初回起動時は所持駒0件・
+    // マスタ0件の空の状態でも正常に画面が表示できることを確認する
     await page.goto("/#/inventory");
     await expect(page.getByRole("heading", { name: "所持駒一覧" })).toBeVisible();
-    // 初期データ（仕様書21章）に含まれる駒が表示されることを確認
-    await page.waitForSelector("text=ジェンイー", { timeout: 10_000 });
+    await expect(page.getByText("0 件")).toBeVisible();
   });
 
   test("AI相談画面でプレビューが生成される", async ({ page }) => {

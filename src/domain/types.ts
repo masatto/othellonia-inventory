@@ -34,7 +34,11 @@ export interface SkillEffect {
   note?: string;
 }
 
-/** 駒マスター1件。GitHubリポジトリに公開してよい事実情報・特徴量のみを保持する。 */
+/**
+ * 駒マスター1件。
+ * 公開リポジトリ(Git/GitHub Pages)には含めず、ユーザーが端末へインポートした
+ * JSONファイルの内容をIndexedDBへ保存したものを指す（詳細はsrc/master/を参照）。
+ */
 export interface PieceMaster {
   pieceId: string;
   fullName: string;
@@ -165,13 +169,26 @@ export interface AppMeta {
   value: string;
 }
 
+/** インポート済みマスタの`masterVersion`文字列を保存するmetaキー */
 export const MASTER_DATA_VERSION_KEY = "masterDataVersion";
+/** 現在有効なマスタの格納スロット("A"|"B")を保存するmetaキー（安全な差し替えに使用） */
+export const ACTIVE_MASTER_SLOT_KEY = "activeMasterSlot";
+/** インポート済みマスタの`generatedAt`文字列を保存するmetaキー */
+export const MASTER_GENERATED_AT_KEY = "masterGeneratedAt";
+/** インポート済みマスタの件数を保存するmetaキー */
+export const MASTER_PIECE_COUNT_KEY = "masterPieceCount";
+/** マスタをインポートした日時(ISO8601)を保存するmetaキー */
+export const MASTER_IMPORTED_AT_KEY = "masterImportedAt";
+/** インポート時に使用したマスタファイル自体のschemaVersionを保存するmetaキー */
+export const MASTER_SCHEMA_VERSION_KEY = "masterSchemaVersionUsed";
+
 /**
  * バックアップJSONのスキーマバージョン。
  * v2で端末内補完データ(localPieceMetadata)を追加、
- * v3でマスタ未登録駒の仮登録データ(localPieces)を追加した。
+ * v3でマスタ未登録駒の仮登録データ(localPieces)を追加、
+ * v4でインポート済みマスタ(masterPieces)を「完全バックアップ」に任意で含められるようにした。
  */
-export const APP_DATA_SCHEMA_VERSION = 3;
+export const APP_DATA_SCHEMA_VERSION = 4;
 
 // ─────────────────────────────────────────────────────────────
 // 駒情報補完（AI調査プロンプト生成・JSON取込）
@@ -204,7 +221,7 @@ export interface SourceUrlEntry {
 
 /**
  * 端末内で保持する駒情報補完データ（IndexedDB: localPieceMetadata）。
- * 公開される駒マスターJSON(public/master/*.json)とは別の、
+ * ユーザーが端末へインポートしたマスタ(IndexedDB: masterPiecesA/B)とは別の、
  * ユーザーがAI調査結果を取り込んで作る個人用データ。GitHubへは送信しない。
  */
 export interface LocalPieceMetadata {
@@ -268,8 +285,8 @@ export type LocalPieceNameStatus = "provisional" | "unknown";
 
 /**
  * マスタに存在しない駒をユーザーが仮登録した記録（IndexedDB: localPieces）。
- * 公開マスターJSON(public/master/*.json)とは別に、内部で発行した一意なpieceIdで
- * 管理する。駒の同一性は常にこのpieceIdで判定し、名称の一致では判定しない。
+ * インポート済みマスタ(IndexedDB: masterPiecesA/B)とは別に、内部で発行した
+ * 一意なpieceIdで管理する。駒の同一性は常にこのpieceIdで判定し、名称の一致では判定しない。
  */
 export interface LocalPieceRecord {
   pieceId: string;

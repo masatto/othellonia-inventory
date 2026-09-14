@@ -24,6 +24,8 @@ export function InventoryPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
+  const [relinkOpenFor, setRelinkOpenFor] = useState<string | null>(null);
+  const [relinkQuery, setRelinkQuery] = useState("");
 
   const rarityOptions = useMemo(() => {
     const set = new Set<string>();
@@ -36,9 +38,11 @@ export function InventoryPage() {
   const rows = useMemo(() => {
     return ownedPieces
       .map((owned) => ({ owned, info: mergedInfoById.get(owned.pieceId) }))
-      .filter((r) => r.info)
       .filter((r) => {
-        const info = r.info!;
+        // マスタ未解決（インポート済みマスタにも仮登録駒にも存在しない）の場合、
+        // 所持情報を削除せず一覧に残し、絞り込みの対象からも除外して見失わないようにする
+        if (!r.info) return true;
+        const info = r.info;
         if (query && !info.fullName.toLowerCase().includes(query.toLowerCase())) return false;
         if (attrFilter && info.attribute !== attrFilter) return false;
         if (rarityFilter && info.rarity !== rarityFilter) return false;
@@ -48,6 +52,35 @@ export function InventoryPage() {
       })
       .sort((a, b) => (a.owned.updatedAt < b.owned.updatedAt ? 1 : -1));
   }, [ownedPieces, mergedInfoById, query, attrFilter, rarityFilter, evoFilter, statusFilter]);
+
+  const relinkCandidates = useMemo(() => {
+    if (!relinkOpenFor) return [];
+    const owned = new Set(ownedPieces.map((o) => o.pieceId));
+    return searchPiecesByName(masterPieces, relinkQuery)
+      .filter((p) => !owned.has(p.pieceId))
+      .slice(0, 20);
+  }, [relinkOpenFor, relinkQuery, masterPieces, ownedPieces]);
+
+  async function relinkPiece(unresolvedPieceId: string, newPieceId: string) {
+    const oldRecord = ownedPieces.find((o) => o.pieceId === unresolvedPieceId);
+    if (!oldRecord) return;
+    const now = new Date().toISOString();
+    const existingTarget = ownedPieces.find((o) => o.pieceId === newPieceId);
+    if (existingTarget) {
+      // 再関連付け先が既に所持駒として存在する場合は、所持数・メモを引き継いで統合する
+      await upsertOwnedPiece({
+        ...existingTarget,
+        quantity: existingTarget.quantity + oldRecord.quantity,
+        memo: [existingTarget.memo, oldRecord.memo].filter(Boolean).join(" / "),
+        updatedAt: now,
+      });
+    } else {
+      await upsertOwnedPiece({ ...oldRecord, pieceId: newPieceId, updatedAt: now });
+    }
+    await deleteOwnedPiece(unresolvedPieceId);
+    setRelinkOpenFor(null);
+    setRelinkQuery("");
+  }
 
   const addCandidates = useMemo(() => {
     if (!addOpen) return [];
@@ -158,7 +191,64 @@ export function InventoryPage() {
 
       <p className="muted">{rows.length} 件</p>
 
-      {rows.map(({ owned, info }) => (
+      {rows.map(({ owned, info }) =>
+        !info ? (
+          <div key={owned.pieceId} className="card" style={{ borderColor: "var(--warning)" }}>
+            <div style={{ fontWeight: 600 }}>マスタ未解決の駒</div>
+            <div className="muted">
+              pieceId: {owned.pieceId} / 所持数 {owned.quantity}
+            </div>
+            <p style={{ color: "var(--warning)" }}>
+              この駒に対応するマスタデータが見つかりません。マスタの差し替えで削除された可能性があります。
+              所持数などの情報は保持されているので、正しい駒を検索して再度関連付けてください。
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setRelinkOpenFor(relinkOpenFor === owned.pieceId ? null : owned.pieceId);
+                  setRelinkQuery("");
+                }}
+              >
+                名前で検索して再関連付け
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={async () => {
+                  if (confirm(`pieceId: ${owned.pieceId} の所持情報を削除しますか？`)) {
+                    await deleteOwnedPiece(owned.pieceId);
+                  }
+                }}
+              >
+                削除
+              </button>
+            </div>
+            {relinkOpenFor === owned.pieceId && (
+              <div className="card" style={{ marginTop: 8 }}>
+                <input
+                  type="search"
+                  placeholder="正しい駒名を検索"
+                  value={relinkQuery}
+                  onChange={(e) => setRelinkQuery(e.target.value)}
+                  autoFocus
+                />
+                <div style={{ maxHeight: 200, overflowY: "auto", marginTop: 8 }}>
+                  {relinkCandidates.map((p) => (
+                    <button
+                      key={p.pieceId}
+                      className="btn btn-block"
+                      style={{ justifyContent: "flex-start", marginBottom: 4 }}
+                      onClick={() => relinkPiece(owned.pieceId, p.pieceId)}
+                    >
+                      {p.fullName}
+                    </button>
+                  ))}
+                  {relinkQuery && relinkCandidates.length === 0 && <p className="muted">該当する駒がありません</p>}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
         <div key={owned.pieceId} className="card">
           <div
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}

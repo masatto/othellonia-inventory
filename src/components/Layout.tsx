@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: "/inventory", label: "所持駒", icon: "🗂" },
   { to: "/consult", label: "AI相談", icon: "💬" },
   { to: "/backup", label: "バックアップ", icon: "💾" },
+  { to: "/settings", label: "設定", icon: "⚙️" },
 ];
 
 export function Layout() {

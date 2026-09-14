@@ -29,6 +29,9 @@ raw-icons/
 downloaded-icons/
 tools/master-builder/tmp/
 tools/master-builder/work/
+# マスタデータは公開リポジトリへコミットしない。ユーザー自身の端末へ
+# インポートするためのファイルはこのフォルダへ出力する（誤コミット防止）
+tools/master-builder/output/
 
 # ユーザーのスクリーンショット・端末内データのエクスポート物（絶対にコミットしない）
 screenshots/

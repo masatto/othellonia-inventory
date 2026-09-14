@@ -8,21 +8,37 @@ import type {
   ScanHistoryRecord,
 } from "../domain/types";
 import {
+  MASTER_DATA_VERSION_KEY,
+  MASTER_GENERATED_AT_KEY,
+  MASTER_IMPORTED_AT_KEY,
+  MASTER_PIECE_COUNT_KEY,
+  MASTER_SCHEMA_VERSION_KEY,
+} from "../domain/types";
+import {
   clearAllData,
+  clearMasterPiecesOnly,
   deleteOwnedPiece as dbDeleteOwnedPiece,
   getAllLocalPieceMetadata,
   getAllLocalPieces,
+  getAllMasterPiecesFromDb,
   getAllOwnedPieces,
   getLatestScanHistory,
   getMeta,
   putLocalPiece,
   putLocalPieceMetadata,
   putOwnedPiece,
-  setMeta,
 } from "../db/database";
-import { fetchAllPieceMaster, fetchManifest, fetchOwnedSeed } from "../master/masterLoader";
-import { MASTER_DATA_VERSION_KEY } from "../domain/types";
+import { applyMasterImport, type MasterImportMode, type MasterImportOutcome } from "../master/masterImport";
+import type { MasterImportFile } from "../master/masterImportSchema";
 import { mergePieceInfo, mergeProvisionalPieceInfo } from "../enrichment/mergePieceInfo";
+
+export interface MasterMeta {
+  masterVersion: string | null;
+  generatedAt: string | null;
+  pieceCount: number;
+  importedAt: string | null;
+  schemaVersion: number | null;
+}
 
 interface AppDataContextValue {
   loading: boolean;
@@ -32,7 +48,9 @@ interface AppDataContextValue {
   ownedPieces: OwnedPiece[];
   ownedById: Map<string, OwnedPiece>;
   latestScan: ScanHistoryRecord | null;
+  /** インポート済みマスタの`masterVersion`文字列（未インポートなら空文字）。バックアップの記録用に維持している */
   masterVersion: string;
+  masterMeta: MasterMeta;
   needsReviewCount: number;
   localMetadata: LocalPieceMetadata[];
   localMetadataById: Map<string, LocalPieceMetadata>;
@@ -43,14 +61,25 @@ interface AppDataContextValue {
   refreshLatestScan: () => Promise<void>;
   refreshLocalMetadata: () => Promise<void>;
   refreshLocalPieces: () => Promise<void>;
+  refreshMasterPieces: () => Promise<void>;
   upsertOwnedPiece: (piece: OwnedPiece) => Promise<void>;
   deleteOwnedPiece: (pieceId: string) => Promise<void>;
   upsertLocalMetadata: (metadata: LocalPieceMetadata) => Promise<void>;
   upsertLocalPiece: (record: LocalPieceRecord) => Promise<void>;
+  importMaster: (file: MasterImportFile, mode: MasterImportMode) => Promise<MasterImportOutcome>;
+  clearMasterOnly: () => Promise<void>;
   resetAllData: () => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
+
+const EMPTY_MASTER_META: MasterMeta = {
+  masterVersion: null,
+  generatedAt: null,
+  pieceCount: 0,
+  importedAt: null,
+  schemaVersion: null,
+};
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -58,7 +87,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [masterPieces, setMasterPieces] = useState<PieceMaster[]>([]);
   const [ownedPieces, setOwnedPieces] = useState<OwnedPiece[]>([]);
   const [latestScan, setLatestScan] = useState<ScanHistoryRecord | null>(null);
-  const [masterVersion, setMasterVersion] = useState("");
+  const [masterMeta, setMasterMeta] = useState<MasterMeta>(EMPTY_MASTER_META);
   const [localMetadata, setLocalMetadata] = useState<LocalPieceMetadata[]>([]);
   const [localPieces, setLocalPieces] = useState<LocalPieceRecord[]>([]);
 
@@ -78,44 +107,49 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setLocalPieces(await getAllLocalPieces());
   }, []);
 
+  const refreshMasterPieces = useCallback(async () => {
+    setMasterPieces(await getAllMasterPiecesFromDb());
+  }, []);
+
+  const loadMasterMeta = useCallback(async (): Promise<MasterMeta> => {
+    const [masterVersion, generatedAt, pieceCountRaw, importedAt, schemaVersionRaw] = await Promise.all([
+      getMeta(MASTER_DATA_VERSION_KEY),
+      getMeta(MASTER_GENERATED_AT_KEY),
+      getMeta(MASTER_PIECE_COUNT_KEY),
+      getMeta(MASTER_IMPORTED_AT_KEY),
+      getMeta(MASTER_SCHEMA_VERSION_KEY),
+    ]);
+    return {
+      masterVersion: masterVersion ?? null,
+      generatedAt: generatedAt ?? null,
+      pieceCount: pieceCountRaw ? Number(pieceCountRaw) : 0,
+      importedAt: importedAt ?? null,
+      schemaVersion: schemaVersionRaw ? Number(schemaVersionRaw) : null,
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const manifest = await fetchManifest();
-        const pieces = await fetchAllPieceMaster();
+        // マスタは公開リポジトリ・GitHub Pagesには含まれず、ユーザーが端末へ
+        // インポートしたものをIndexedDBから読み出す。未インポートでも0件として
+        // 正常に起動できる（ネットワークfetchは行わない）
+        const [pieces, owned, scan, metadata, localPiecesData, meta] = await Promise.all([
+          getAllMasterPiecesFromDb(),
+          getAllOwnedPieces(),
+          getLatestScanHistory(),
+          getAllLocalPieceMetadata(),
+          getAllLocalPieces(),
+          loadMasterMeta(),
+        ]);
         if (cancelled) return;
         setMasterPieces(pieces);
-        setMasterVersion(manifest.masterVersion);
-
-        const storedVersion = await getMeta(MASTER_DATA_VERSION_KEY);
-        let owned = await getAllOwnedPieces();
-        if (owned.length === 0 && storedVersion === undefined) {
-          // 初回起動時のみ、既知の初期データ（仕様書21章）を投入する
-          const seed = await fetchOwnedSeed();
-          const now = new Date().toISOString();
-          for (const s of seed) {
-            await putOwnedPiece({
-              pieceId: s.pieceId,
-              quantity: s.quantity,
-              skillLevel: null,
-              ownedStatus: s.ownedStatus as OwnedPiece["ownedStatus"],
-              recognitionConfidence: null,
-              confirmedByUser: true,
-              firstDetectedAt: now,
-              lastDetectedAt: now,
-              updatedAt: now,
-              memo: s.memo,
-            });
-          }
-          owned = await getAllOwnedPieces();
-        }
-        await setMeta(MASTER_DATA_VERSION_KEY, manifest.masterVersion);
-        if (cancelled) return;
         setOwnedPieces(owned);
-        setLatestScan((await getLatestScanHistory()) ?? null);
-        setLocalMetadata(await getAllLocalPieceMetadata());
-        setLocalPieces(await getAllLocalPieces());
+        setLatestScan(scan ?? null);
+        setLocalMetadata(metadata);
+        setLocalPieces(localPiecesData);
+        setMasterMeta(meta);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -125,7 +159,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadMasterMeta]);
 
   const upsertOwnedPiece = useCallback(async (piece: OwnedPiece) => {
     await putOwnedPiece(piece);
@@ -159,12 +193,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const importMaster = useCallback(
+    async (file: MasterImportFile, mode: MasterImportMode): Promise<MasterImportOutcome> => {
+      const outcome = await applyMasterImport(file, mode);
+      const [pieces, meta] = await Promise.all([getAllMasterPiecesFromDb(), loadMasterMeta()]);
+      setMasterPieces(pieces);
+      setMasterMeta(meta);
+      return outcome;
+    },
+    [loadMasterMeta],
+  );
+
+  const clearMasterOnly = useCallback(async () => {
+    await clearMasterPiecesOnly();
+    setMasterPieces([]);
+    setMasterMeta(EMPTY_MASTER_META);
+  }, []);
+
   const resetAllData = useCallback(async () => {
     await clearAllData();
     setOwnedPieces([]);
     setLatestScan(null);
     setLocalMetadata([]);
     setLocalPieces([]);
+    setMasterPieces([]);
+    setMasterMeta(EMPTY_MASTER_META);
   }, []);
 
   const masterById = useMemo(() => new Map(masterPieces.map((p) => [p.pieceId, p])), [masterPieces]);
@@ -194,7 +247,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     ownedPieces,
     ownedById,
     latestScan,
-    masterVersion,
+    masterVersion: masterMeta.masterVersion ?? "",
+    masterMeta,
     needsReviewCount,
     localMetadata,
     localMetadataById,
@@ -205,10 +259,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     refreshLatestScan,
     refreshLocalMetadata,
     refreshLocalPieces,
+    refreshMasterPieces,
     upsertOwnedPiece,
     deleteOwnedPiece,
     upsertLocalMetadata,
     upsertLocalPiece,
+    importMaster,
+    clearMasterOnly,
     resetAllData,
   };
 

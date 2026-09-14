@@ -3,14 +3,16 @@ import { useSearchParams } from "react-router-dom";
 import { useAppData } from "../state/AppDataContext";
 import { getMissingFields, MISSING_FIELD_LABELS } from "../enrichment/mergePieceInfo";
 import { buildInvestigationPrompt, splitIntoBatches, estimatePromptLength, type PromptTargetPiece } from "../enrichment/promptGeneration";
+import { buildNameSearchPrompt, type NameSearchTargetPiece } from "../enrichment/nameSearchPromptGeneration";
 import { parseExtractedJson } from "../enrichment/jsonExtraction";
 import { validateAiResponseSchema } from "../enrichment/aiResponseSchema";
+import { validateNameSearchResponse, type NameSearchPiece } from "../enrichment/nameSearchSchema";
 import { buildAllPieceDiffs, buildLocalMetadataFromAiPiece, type PieceDiff } from "../enrichment/diff";
 import { copyToClipboard, downloadTextFile } from "../backup/shareUtils";
 import type { OwnedStatus } from "../domain/types";
 
 type FilterMode = "missing" | "complete" | "needs_review" | "declared_only" | "all";
-type Step = "list" | "prompt" | "import" | "diff";
+type Step = "list" | "prompt" | "import" | "diff" | "nameSearchPrompt" | "nameSearchImport" | "nameCandidates";
 
 export function EnrichmentPage() {
   const [searchParams] = useSearchParams();
@@ -33,6 +35,16 @@ export function EnrichmentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
+  // 駒名候補検索（第1段階）: 曖昧な仮称・略称から正式名称の候補を確認するための状態
+  const [nameSearchPromptBatches, setNameSearchPromptBatches] = useState<string[]>([]);
+  const [nameSearchCopiedBatch, setNameSearchCopiedBatch] = useState<number | null>(null);
+  const [nameSearchImportText, setNameSearchImportText] = useState("");
+  const [nameSearchImportError, setNameSearchImportError] = useState<string[] | null>(null);
+  const [nameSearchResults, setNameSearchResults] = useState<NameSearchPiece[]>([]);
+  /** pieceId -> 選択した候補のインデックス（result.candidates内） */
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState<Map<string, number>>(new Map());
+  const nameSearchFileInputRef = useRef<HTMLInputElement>(null);
+
   const rows = useMemo(
     () =>
       ownedPieces
@@ -52,6 +64,11 @@ export function EnrichmentPage() {
     }
     return { missing, complete, needsReview };
   }, [rows]);
+
+  const selectedProvisionalCount = useMemo(
+    () => rows.filter((r) => selected.has(r.owned.pieceId) && r.info.isUserRegistered).length,
+    [rows, selected],
+  );
 
   const filteredRows = useMemo(() => {
     switch (filterMode) {
@@ -109,6 +126,90 @@ export function EnrichmentPage() {
     await copyToClipboard(promptBatches[index]);
     setCopiedBatch(index);
     setTimeout(() => setCopiedBatch(null), 2000);
+  }
+
+  /**
+   * 駒名候補検索（第1段階）用プロンプトを生成する。対象はマスタ未登録の
+   * 仮登録駒のみ（マスタ登録駒は正式名称が既に確定しており曖昧さが無いため）。
+   */
+  function generateNameSearchPrompt() {
+    const targets: NameSearchTargetPiece[] = rows
+      .filter((r) => selected.has(r.owned.pieceId) && r.info.isUserRegistered)
+      .map((r) => ({ pieceId: r.owned.pieceId, inputName: r.info.fullName }));
+    if (targets.length === 0) {
+      alert("駒名の候補確認は、マスタに登録されていない仮登録駒が対象です。仮登録駒（仮登録駒タグの付いた駒）を選択してください。");
+      return;
+    }
+    const batches = splitIntoBatches(targets).map((batch) => buildNameSearchPrompt(batch));
+    setNameSearchPromptBatches(batches);
+    setStep("nameSearchPrompt");
+  }
+
+  async function copyNameSearchBatch(index: number) {
+    await copyToClipboard(nameSearchPromptBatches[index]);
+    setNameSearchCopiedBatch(index);
+    setTimeout(() => setNameSearchCopiedBatch(null), 2000);
+  }
+
+  function runNameSearchValidation(text: string) {
+    setNameSearchImportError(null);
+    const parsed = parseExtractedJson(text);
+    if (!parsed.ok) {
+      setNameSearchImportError([parsed.error ?? "JSONの解析に失敗しました"]);
+      return;
+    }
+    const validated = validateNameSearchResponse(parsed.data);
+    if (!validated.ok) {
+      setNameSearchImportError(validated.errors);
+      return;
+    }
+    setNameSearchResults(validated.data.pieces);
+    setSelectedCandidateIndex(new Map());
+    setStep("nameCandidates");
+  }
+
+  async function handleNameSearchFileSelect(file: File) {
+    const text = await file.text();
+    runNameSearchValidation(text);
+  }
+
+  function selectCandidate(pieceId: string, index: number) {
+    setSelectedCandidateIndex((prev) => {
+      const next = new Map(prev);
+      next.set(pieceId, index);
+      return next;
+    });
+  }
+
+  function clearCandidateSelection(pieceId: string) {
+    setSelectedCandidateIndex((prev) => {
+      const next = new Map(prev);
+      next.delete(pieceId);
+      return next;
+    });
+  }
+
+  /** 選択された候補の正式名称を使って、性能調査用プロンプト（第2段階・既存フロー）を生成する */
+  function generatePromptFromSelectedCandidates() {
+    const targets: PromptTargetPiece[] = [];
+    for (const result of nameSearchResults) {
+      const index = selectedCandidateIndex.get(result.pieceId);
+      if (index === undefined) continue;
+      const candidate = result.candidates?.[index];
+      if (!candidate) continue;
+      targets.push({
+        pieceId: result.pieceId,
+        fullName: candidate.fullName,
+        existing: mergedInfoById.get(result.pieceId),
+      });
+    }
+    if (targets.length === 0) {
+      alert("性能調査を行う駒の候補を1件以上選択してください。");
+      return;
+    }
+    const batches = splitIntoBatches(targets).map((batch) => buildInvestigationPrompt(batch));
+    setPromptBatches(batches);
+    setStep("prompt");
   }
 
   function runValidation(text: string) {
@@ -221,6 +322,180 @@ export function EnrichmentPage() {
         </button>
         <button className="btn btn-primary btn-block" onClick={() => setStep("import")}>
           ChatGPTの回答（JSON）を取り込む
+        </button>
+      </div>
+    );
+  }
+
+  if (step === "nameSearchPrompt") {
+    return (
+      <div className="screen">
+        <h1>駒名候補検索プロンプト</h1>
+        <p className="muted">
+          この段階では性能情報は調査しません。曖昧な名称から正式名称の候補を確認し、次の画面で1件選んでから
+          改めて性能調査用プロンプトを生成します。
+        </p>
+        {nameSearchPromptBatches.map((batch, i) => (
+          <div className="card" key={i}>
+            <h2>
+              バッチ {i + 1} / {nameSearchPromptBatches.length}（約{estimatePromptLength(batch)}文字）
+            </h2>
+            <pre
+              style={{
+                whiteSpace: "pre-wrap",
+                fontSize: 12,
+                maxHeight: 260,
+                overflowY: "auto",
+                background: "var(--bg)",
+                padding: 8,
+                borderRadius: 8,
+              }}
+            >
+              {batch}
+            </pre>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn" onClick={() => copyNameSearchBatch(i)}>
+                {nameSearchCopiedBatch === i ? "コピーしました" : "📋 コピー"}
+              </button>
+              <button
+                className="btn"
+                onClick={() => downloadTextFile(`othellonia-name-search-${i + 1}.txt`, batch, "text/plain")}
+              >
+                💾 テキスト保存
+              </button>
+            </div>
+          </div>
+        ))}
+        <button className="btn btn-block" onClick={() => setStep("list")} style={{ marginBottom: 8 }}>
+          一覧へ戻る
+        </button>
+        <button className="btn btn-primary btn-block" onClick={() => setStep("nameSearchImport")}>
+          ChatGPTの回答（JSON）を取り込む
+        </button>
+      </div>
+    );
+  }
+
+  if (step === "nameSearchImport") {
+    return (
+      <div className="screen">
+        <h1>駒名候補のJSON取込</h1>
+        <p className="muted">
+          ChatGPTの回答をそのまま貼り付けてください。```json コードブロックがあれば自動で抽出します。
+        </p>
+        <div className="card">
+          <textarea
+            rows={10}
+            value={nameSearchImportText}
+            onChange={(e) => setNameSearchImportText(e.target.value)}
+            placeholder="ChatGPTの回答をここに貼り付け"
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <button className="btn btn-primary" onClick={() => runNameSearchValidation(nameSearchImportText)}>
+              検証する
+            </button>
+            <button className="btn" onClick={() => nameSearchFileInputRef.current?.click()}>
+              📂 JSONファイルを選択
+            </button>
+          </div>
+          <input
+            ref={nameSearchFileInputRef}
+            type="file"
+            accept="application/json,.json,.txt"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleNameSearchFileSelect(file);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        {nameSearchImportError && (
+          <div className="card" style={{ borderColor: "var(--danger)" }}>
+            <h2>検証エラー</h2>
+            <ul>
+              {nameSearchImportError.map((e, i) => (
+                <li key={i} className="muted">
+                  {e}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <button className="btn btn-block" onClick={() => setStep("list")}>
+          一覧へ戻る
+        </button>
+      </div>
+    );
+  }
+
+  if (step === "nameCandidates") {
+    return (
+      <div className="screen">
+        <h1>駒名の候補確認</h1>
+        <p className="muted">
+          曖昧な名称の場合、性能情報はまだ確定していません。正式名称の候補から該当するものを1件選んでください。
+          選択しなかった駒は今回の性能調査には含まれません。
+        </p>
+        {nameSearchResults.map((result) => {
+          const candidates = result.candidates ?? [];
+          const selectedIndex = selectedCandidateIndex.get(result.pieceId);
+          return (
+            <div key={result.pieceId} className="card">
+              <div style={{ fontWeight: 600 }}>入力名: {result.inputName ?? "（不明）"}</div>
+              <div style={{ margin: "4px 0 8px" }}>
+                {result.matchStatus === "exact" && <span className="tag tag-success">一致</span>}
+                {result.matchStatus === "ambiguous" && <span className="tag tag-warning">複数候補</span>}
+                {result.matchStatus === "not_found" && <span className="tag tag-warning">見つかりません</span>}
+              </div>
+              {candidates.length === 0 ? (
+                <p className="muted">候補を確認できませんでした。仮の名称を変えて再度お試しください。</p>
+              ) : (
+                <>
+                  {candidates.map((c, i) => (
+                    <label
+                      key={i}
+                      className="card"
+                      style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-start" }}
+                    >
+                      <input
+                        type="radio"
+                        name={`candidate-${result.pieceId}`}
+                        checked={selectedIndex === i}
+                        onChange={() => selectCandidate(result.pieceId, i)}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600 }}>{c.fullName}</div>
+                        <div className="muted">
+                          属性 {c.attribute ?? "不明"} / ランク {c.rarity ?? "不明"} / 形態 {c.evolutionType ?? "不明"}
+                          {c.version ? ` / バージョン ${c.version}` : ""}
+                        </div>
+                        {c.sourceUrls && c.sourceUrls.length > 0 && (
+                          <div className="muted">出典: {c.sourceUrls.map((u) => u.title ?? u.url).join(", ")}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                  {selectedIndex !== undefined && (
+                    <button className="btn" onClick={() => clearCandidateSelection(result.pieceId)}>
+                      選択を解除
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+        <button
+          className="btn btn-primary btn-block"
+          disabled={selectedCandidateIndex.size === 0}
+          onClick={generatePromptFromSelectedCandidates}
+          style={{ marginBottom: 8 }}
+        >
+          選択した{selectedCandidateIndex.size}件の名称で性能調査用プロンプトを生成する
+        </button>
+        <button className="btn btn-block" onClick={() => setStep("list")}>
+          一覧へ戻る
         </button>
       </div>
     );
@@ -421,6 +696,7 @@ export function EnrichmentPage() {
                 <div style={{ fontWeight: 600 }}>{info.fullName}</div>
                 <div className="muted">
                   所持数 {owned.quantity} / <StatusLabel status={owned.ownedStatus} />
+                  {info.isUserRegistered && <span className="tag" style={{ marginLeft: 4 }}>仮登録駒</span>}
                 </div>
                 <div className="muted">
                   属性 {info.attribute ?? "不明"} / ランク {info.rarity ?? "不明"} / 形態 {info.evolutionType ?? "不明"}
@@ -448,6 +724,18 @@ export function EnrichmentPage() {
       <button className="btn btn-primary btn-block" disabled={selected.size === 0} onClick={generatePrompt}>
         AI調査用プロンプトを生成（{selected.size}件）
       </button>
+      <button
+        className="btn btn-block"
+        style={{ marginTop: 8 }}
+        disabled={selectedProvisionalCount === 0}
+        onClick={generateNameSearchPrompt}
+      >
+        🔍 駒名の候補を確認する（仮登録駒{selectedProvisionalCount}件）
+      </button>
+      <p className="muted" style={{ marginTop: 4 }}>
+        仮登録駒は名称が曖昧な場合があります。「ルシファー」のような略称の場合は、先にこちらで正式名称の
+        候補を確認してから性能調査を行うことを推奨します。
+      </p>
       <button className="btn btn-block" style={{ marginTop: 8 }} onClick={() => setStep("import")}>
         JSONを貼り付ける／選択する
       </button>

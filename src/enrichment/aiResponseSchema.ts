@@ -5,8 +5,8 @@ import { z } from "zod";
  * HTML/スクリプトの混入や異常に長い文字列、危険なURLスキームを拒否する。
  */
 
-const SAFE_STRING_MAX = 300;
-const NAME_MAX = 200;
+export const SAFE_STRING_MAX = 300;
+export const NAME_MAX = 200;
 
 export const noHtml = (value: string) => !/<[^>]*>/.test(value);
 
@@ -56,7 +56,7 @@ export const sourceUrlSchema = z.object({
   title: safeStringNullable(NAME_MAX),
 });
 
-const dateStringSchema = z
+export const dateStringSchema = z
   .string()
   .refine((s) => !Number.isNaN(Date.parse(s)), "checkedAtは有効な日付ではありません");
 

@@ -116,6 +116,12 @@ test.describe("駒情報補完機能", () => {
     await page.getByRole("button", { name: "検証する" }).click();
     await page.getByRole("button", { name: /選択した\d+件を保存する/ }).click();
 
+    // 保存完了メッセージが表示されるまで待ち、IndexedDBへの書き込みが
+    // 完了したことを確認してからページを再読み込みする
+    // (クリックはハンドラの非同期処理の完了を待たないため、確認なしに
+    //  reloadすると書き込み途中でページが破棄されるレースが起こりうる)
+    await expect(page.getByText("件の補完情報を保存しました")).toBeVisible({ timeout: 10_000 });
+
     await page.reload();
     await page.goto("/#/inventory");
     const row = page.locator(".card", { hasText: "［霊猫の愛娘］ミャオ" }).first();

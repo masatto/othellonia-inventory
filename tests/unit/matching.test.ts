@@ -92,4 +92,20 @@ describe("findSiblingDuplicate（同一スキャン内の被り検出）", () =>
     ]);
     expect(match?.pieceId).toBe("local-exact");
   });
+
+  it("「NEW」バッジ等でdHash/aHashだけが局所的に異なっていても、pHashと色が一致していれば被りとして提案する", () => {
+    // 実機で「同じ駒なのに被り提案が出ない」不具合の再現ケース。
+    // 新規取得バッジの有無で切り出し画像の一部だけが変わると、ブロック単位で
+    // 敏感なdHash/aHashは大きくずれるが、低周波成分のpHashと色分布は
+    // ほとんど変わらないため、被り判定はこの2つだけで行う。
+    const withBadge: CellFeatures = {
+      pHash: "ffffffffffffffff",
+      dHash: "0000000000000000", // バッジの影響で全く別のdHashになったと仮定
+      aHash: "0000000000000000",
+      colorHistogram: [1, 0, 0, 0],
+    };
+    const match = findSiblingDuplicate(withBadge, [{ cellIndex: 0, pieceId: "local-badge", cell: identical }]);
+    expect(match).not.toBeNull();
+    expect(match?.pieceId).toBe("local-badge");
+  });
 });

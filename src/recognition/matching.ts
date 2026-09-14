@@ -53,14 +53,31 @@ export interface SiblingDuplicateMatch {
   sourceCellIndex: number;
 }
 
-/** 同一スキャン内で確定済みの他マスと極めて近い場合に「被り」候補として提案する閾値 */
-export const SIBLING_DUPLICATE_MIN_SCORE = 0.9;
+/**
+ * 被り（同一スキャン内の重複）判定専用の類似度。学習済みデータとの照合に使う
+ * cellSimilarity とは別の重み付けを使う。実機検証で、同じ駒アイコンでも
+ * 「NEW」等の新規取得バッジが片方だけに乗っているとdHash/aHashが局所的な
+ * 差分に敏感に反応し、類似度が想定より下がってしまうことが分かったため。
+ * DCTの低周波成分だけを見るpHashと、画像全体の色分布を見る色ヒストグラムは
+ * 隅の小さなバッジ程度では大きく変化しないため、この2つだけで判定する。
+ */
+function siblingSimilarity(a: CellFeatures, b: CellFeatures): number {
+  const pHashDist = hammingDistance(a.pHash, b.pHash);
+  const hashSim = 1 - pHashDist / 64;
+  const colorSim = histogramSimilarity(a.colorHistogram, b.colorHistogram);
+  return hashSim * 0.5 + colorSim * 0.5;
+}
+
+/** 同一スキャン内で確定済みの他マスと近い場合に「被り」候補として提案する閾値 */
+export const SIBLING_DUPLICATE_MIN_SCORE = 0.85;
 
 /**
  * 同一スクリーンショット内に同じ駒が複数写っている「被り」を検出する。
  * 学習済みデータベース（過去に確認・保存した駒）とは独立に、今回のスキャンで
  * 既に駒が確定した他のマスとだけ比較する。同じ駒であれば元画像がほぼ同一の
- * ため、名前を入力しなくても高い類似度で一致させられる。
+ * ため、名前を入力しなくても高い類似度で一致させられる。この提案はユーザーが
+ * ボタンを押して初めて反映される（自動確定ではない）ため、閾値は学習済み
+ * データとの自動確定判定より緩めに設定している。
  */
 export function findSiblingDuplicate(
   cell: CellFeatures,
@@ -68,7 +85,7 @@ export function findSiblingDuplicate(
 ): SiblingDuplicateMatch | null {
   let best: SiblingDuplicateMatch | null = null;
   for (const sibling of resolvedSiblings) {
-    const score = cellSimilarity(cell, sibling.cell);
+    const score = siblingSimilarity(cell, sibling.cell);
     if (score >= SIBLING_DUPLICATE_MIN_SCORE && (!best || score > best.score)) {
       best = { pieceId: sibling.pieceId, score, sourceCellIndex: sibling.cellIndex };
     }

@@ -1,6 +1,11 @@
 import type { MergedPieceInfo } from "../domain/types";
 
-export const MAX_PIECES_PER_BATCH = 20;
+/**
+ * 1回のプロンプトで調査対象にする駒の件数。プロンプトは駒ごとにWeb検索を
+ * 要求する内容のため、件数が多いとChatGPT側の検索・JSON生成が重くなり、
+ * 応答が固まる/時間がかかる原因になる。実用上のバランスを取ってこの値にしている。
+ */
+export const MAX_PIECES_PER_BATCH = 5;
 
 export interface PromptTargetPiece {
   pieceId: string;

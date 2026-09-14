@@ -96,17 +96,17 @@ describe("buildInvestigationPrompt", () => {
 });
 
 describe("splitIntoBatches", () => {
-  it("20件ごとに分割する", () => {
-    const items = Array.from({ length: 45 }, (_, i) => i);
+  it("5件ごとに分割する", () => {
+    const items = Array.from({ length: 12 }, (_, i) => i);
     const batches = splitIntoBatches(items, MAX_PIECES_PER_BATCH);
     expect(batches).toHaveLength(3);
-    expect(batches[0]).toHaveLength(20);
-    expect(batches[1]).toHaveLength(20);
-    expect(batches[2]).toHaveLength(5);
+    expect(batches[0]).toHaveLength(5);
+    expect(batches[1]).toHaveLength(5);
+    expect(batches[2]).toHaveLength(2);
   });
 
-  it("20件以下なら1バッチにまとまる", () => {
-    const items = Array.from({ length: 10 }, (_, i) => i);
+  it("5件以下なら1バッチにまとまる", () => {
+    const items = Array.from({ length: 4 }, (_, i) => i);
     const batches = splitIntoBatches(items, MAX_PIECES_PER_BATCH);
     expect(batches).toHaveLength(1);
   });

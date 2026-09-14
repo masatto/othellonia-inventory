@@ -26,6 +26,27 @@ function looksLikeJson(text: string): boolean {
   return text.startsWith("{") || text.startsWith("[");
 }
 
+const SMART_QUOTE_PATTERN = /[“”„‟‘’‚‛]/g;
+const SMART_QUOTE_MAP: Record<string, string> = {
+  "“": '"', // “
+  "”": '"', // ”
+  "„": '"', // „
+  "‟": '"', // ‟
+  "‘": "'", // ‘
+  "’": "'", // ’
+  "‚": "'", // ‚
+  "‛": "'", // ‛
+};
+
+/**
+ * ChatGPT等のチャットUIからコピーすると、スマート引用符（丸みを帯びた引用符）に
+ * 自動変換され、JSON構造上の"がすべて崩れることがある。パース失敗時のみ
+ * 復元を試みるフォールバックとして使う。
+ */
+export function normalizeSmartQuotes(text: string): string {
+  return text.replace(SMART_QUOTE_PATTERN, (ch) => SMART_QUOTE_MAP[ch] ?? ch);
+}
+
 export interface ParsedJsonResult {
   ok: boolean;
   data?: unknown;
@@ -45,7 +66,20 @@ export function parseExtractedJson(raw: string, maxBytes = 300_000): ParsedJsonR
   try {
     const data = JSON.parse(extracted);
     return { ok: true, data };
-  } catch (e) {
-    return { ok: false, error: `JSONの解析に失敗しました: ${e instanceof Error ? e.message : String(e)}` };
+  } catch (firstError) {
+    // スマート引用符が原因の可能性があるため、正規化して再試行する
+    const normalized = normalizeSmartQuotes(extracted);
+    if (normalized !== extracted) {
+      try {
+        const data = JSON.parse(normalized);
+        return { ok: true, data };
+      } catch {
+        // 正規化しても解析できない場合は元のエラーを返す
+      }
+    }
+    return {
+      ok: false,
+      error: `JSONの解析に失敗しました: ${firstError instanceof Error ? firstError.message : String(firstError)}`,
+    };
   }
 }

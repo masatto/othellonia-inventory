@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractJsonText, parseExtractedJson } from "../../src/enrichment/jsonExtraction";
+import { extractJsonText, normalizeSmartQuotes, parseExtractedJson } from "../../src/enrichment/jsonExtraction";
 
 describe("extractJsonText", () => {
   it("```json コードブロックからJSONを抽出する", () => {
@@ -45,5 +45,35 @@ describe("parseExtractedJson", () => {
     const result = parseExtractedJson(huge, 300_000);
     expect(result.ok).toBe(false);
     expect(result.error).toContain("サイズ");
+  });
+
+  it("チャットUIのスマート引用符（“ ”）で構造上の\"が崩れていても解析できる", () => {
+    // ChatGPT等からコピーした際に " が “ ” へ自動変換されるケースを再現する
+    const raw = "```json\n{“pieceId”: “sd001”, “fullName”: “［架空］アルファ”}\n```";
+    const result = parseExtractedJson(raw);
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({ pieceId: "sd001", fullName: "［架空］アルファ" });
+  });
+
+  it("スマート引用符に正規化しても解析できない場合は元のエラーを返す", () => {
+    const result = parseExtractedJson("{a: 1,}");
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+});
+
+describe("normalizeSmartQuotes", () => {
+  it("スマートダブルクォートを直線的な\"へ変換する", () => {
+    expect(normalizeSmartQuotes("“abc”")).toBe('"abc"');
+    expect(normalizeSmartQuotes("„abc‟")).toBe('"abc"');
+  });
+
+  it("スマートシングルクォートを直線的な'へ変換する", () => {
+    expect(normalizeSmartQuotes("‘abc’")).toBe("'abc'");
+    expect(normalizeSmartQuotes("‚abc‛")).toBe("'abc'");
+  });
+
+  it("スマート引用符が無ければ変更しない", () => {
+    expect(normalizeSmartQuotes('{"a": 1}')).toBe('{"a": 1}');
   });
 });

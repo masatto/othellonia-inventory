@@ -36,6 +36,8 @@ user-data/
 scan-results/
 tmp/
 temp/
+tests/fixtures/local-only/
+test-artifacts/
 
 # ローカルDB・バックアップJSON（所持駒データを含む可能性があるため）
 *.sqlite

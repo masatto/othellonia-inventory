@@ -5,6 +5,9 @@ import { computeFullImageHash } from "../recognition/fullImageHash";
 import { getAllLearnedFeatures, getAllScanHistory } from "../db/database";
 import { usePendingScan } from "../state/PendingScanContext";
 import { hammingDistance } from "../recognition/imageHash";
+import type { GridConfig } from "../recognition/gridDetection";
+import { persistGridConfig } from "../recognition/gridCalibration";
+import { GridOverlayCalibrator } from "../components/GridOverlayCalibrator";
 
 interface SelectedImage {
   file: File;
@@ -19,6 +22,7 @@ export function ImportPage() {
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState<PipelineProgress | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -58,8 +62,9 @@ export function ImportPage() {
     });
   }
 
-  async function startRecognition() {
+  async function startRecognition(gridConfig: GridConfig) {
     if (images.length === 0) return;
+    setCalibrating(false);
     setProcessing(true);
     setProgress(null);
     const controller = new AbortController();
@@ -70,6 +75,7 @@ export function ImportPage() {
       const output = await runRecognitionPipeline({
         images: images.map((img, idx) => ({ imageIndex: idx, file: img.file })),
         learnedFeatures,
+        gridConfig,
         signal: controller.signal,
         onProgress: setProgress,
       });
@@ -98,6 +104,11 @@ export function ImportPage() {
 
   function cancelRecognition() {
     abortRef.current?.abort();
+  }
+
+  async function handleCalibrationConfirm(gridConfig: GridConfig, width: number, height: number) {
+    await persistGridConfig(gridConfig, width, height);
+    await startRecognition(gridConfig);
   }
 
   return (
@@ -163,6 +174,10 @@ export function ImportPage() {
         </div>
       )}
 
+      {calibrating && images.length > 0 && (
+        <GridOverlayCalibrator file={images[0].file} initialConfig={null} onConfirm={handleCalibrationConfirm} />
+      )}
+
       {processing && (
         <div className="card">
           <h2>処理状況</h2>
@@ -177,8 +192,8 @@ export function ImportPage() {
         </div>
       )}
 
-      {!processing && (
-        <button className="btn btn-primary btn-block" disabled={images.length === 0} onClick={startRecognition}>
+      {!processing && !calibrating && (
+        <button className="btn btn-primary btn-block" disabled={images.length === 0} onClick={() => setCalibrating(true)}>
           認識開始
         </button>
       )}

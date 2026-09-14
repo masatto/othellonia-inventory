@@ -1,5 +1,5 @@
 import type { DetectedCell, LearnedFeature, RecognitionResult } from "../domain/types";
-import { DEFAULT_GRID_CONFIG, type GridConfig } from "./gridDetection";
+import { defaultGridConfigFor, type GridConfig } from "./gridDetection";
 import { judgeConfidence, rankCandidates } from "./matching";
 import { cellKey, detectScrollOverlap, type OverlapInputCell } from "./overlapDetection";
 import type { ImageProcessedResponse, ProcessedCell } from "../workers/recognitionWorker";
@@ -65,6 +65,7 @@ function processedCellToDetectedCell(imageIndex: number, cell: ProcessedCell): D
     aHash: cell.aHash,
     colorHistogram: cell.colorHistogram,
     thumbnailDataUrl: canvas.toDataURL("image/png"),
+    partial: cell.partial,
   };
 }
 
@@ -97,7 +98,6 @@ function runOneImage(
  */
 export async function runRecognitionPipeline(options: RunPipelineOptions): Promise<PipelineOutput> {
   const { images, learnedFeatures, onProgress, signal } = options;
-  const gridConfig = options.gridConfig ?? DEFAULT_GRID_CONFIG;
   const worker = new Worker(new URL("../workers/recognitionWorker.ts", import.meta.url), { type: "module" });
 
   try {
@@ -112,6 +112,9 @@ export async function runRecognitionPipeline(options: RunPipelineOptions): Promi
         return { results: [], overlapDuplicateCount: 0, cancelled: true };
       }
       onProgress?.({ imageIndex: img.imageIndex, totalImages: images.length, stage: "detecting" });
+      // gridConfigが指定されない場合は、この画像サイズに合わせた比率ベースの既定値を使う
+      // （固定5x5等へはフォールバックしない）
+      const gridConfig = options.gridConfig ?? defaultGridConfigFor(bitmap.width, bitmap.height);
       const processed = await runOneImage(worker, img.imageIndex, bitmap, gridConfig);
       allProcessed.push({ imageIndex: img.imageIndex, cells: processed.cells });
     }
@@ -130,11 +133,13 @@ export async function runRecognitionPipeline(options: RunPipelineOptions): Promi
         const detectedCell = processedCellToDetectedCell(p.imageIndex, cell);
         const isOverlap = overlap.duplicateCellKeys.has(cellKey(p.imageIndex, cell.row, cell.col));
         const candidates = rankCandidates(cell, learnedFeatures);
-        const { confidence, reviewStatus } = judgeConfidence(candidates);
+        const judged = judgeConfidence(candidates);
+        // 画面端で一部だけ表示されたセルは、識別に十分な情報がないため自動確定しない
+        const reviewStatus = cell.partial && judged.reviewStatus === "auto_confirmed" ? "needs_review" : judged.reviewStatus;
         results.push({
           cell: detectedCell,
           candidates: candidates.slice(0, 5).map((c) => ({ pieceId: c.pieceId, score: c.score, source: "learned" })),
-          confidence,
+          confidence: judged.confidence,
           reviewStatus,
           isOverlapDuplicate: isOverlap,
           assignedPieceId: reviewStatus === "auto_confirmed" ? candidates[0].pieceId : null,

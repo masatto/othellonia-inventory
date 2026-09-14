@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { extractFeatures } from "../recognition/imageHash";
-import { computeCellRects, DEFAULT_GRID_CONFIG, type GridConfig } from "../recognition/gridDetection";
+import { computeCellRects, defaultGridConfigFor, isCellEmpty, type GridConfig } from "../recognition/gridDetection";
 
 /**
  * 画像の重い処理（グリッド切り出し・特徴量計算）をUIスレッドから切り離すためのWorker。
@@ -29,6 +29,7 @@ export interface ProcessedCell {
   thumbWidth: number;
   thumbHeight: number;
   thumbData: Uint8ClampedArray;
+  partial: boolean;
 }
 
 export interface ImageProcessedResponse {
@@ -84,7 +85,7 @@ function processImage(msg: ProcessImageRequest) {
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
 
-  const rects = computeCellRects(gridConfig ?? DEFAULT_GRID_CONFIG, canvas.width, canvas.height);
+  const rects = computeCellRects(gridConfig ?? defaultGridConfigFor(canvas.width, canvas.height), canvas.width, canvas.height);
   const cells: ProcessedCell[] = [];
   const thumbCanvas = new OffscreenCanvas(THUMB_SIZE, THUMB_SIZE);
   const thumbCtx = thumbCanvas.getContext("2d", { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
@@ -97,6 +98,13 @@ function processImage(msg: ProcessImageRequest) {
     if (rw <= 0 || rh <= 0) continue;
 
     const imageData = ctx.getImageData(rx, ry, rw, rh);
+
+    // 空セル（背景のみ、駒が存在しない）は認識対象から除外する
+    if (!rect.partial && isCellEmpty(imageData)) {
+      postResponse({ type: "progress", imageIndex, processedCells: cells.length, totalCells: rects.length });
+      continue;
+    }
+
     const features = extractFeatures(imageData);
 
     thumbCtx.clearRect(0, 0, THUMB_SIZE, THUMB_SIZE);
@@ -118,6 +126,7 @@ function processImage(msg: ProcessImageRequest) {
       thumbWidth: THUMB_SIZE,
       thumbHeight: THUMB_SIZE,
       thumbData: new Uint8ClampedArray(thumbData.data),
+      partial: rect.partial,
     });
 
     postResponse({ type: "progress", imageIndex, processedCells: cells.length, totalCells: rects.length });

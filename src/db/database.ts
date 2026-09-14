@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { OwnedPiece, LearnedFeature, ScanHistoryRecord, AppMeta } from "../domain/types";
+import type { OwnedPiece, LearnedFeature, ScanHistoryRecord, AppMeta, GridCalibration } from "../domain/types";
 
 interface OthelloniaDB extends DBSchema {
   ownedPieces: {
@@ -20,10 +20,14 @@ interface OthelloniaDB extends DBSchema {
     key: string;
     value: AppMeta;
   };
+  gridCalibrations: {
+    key: string; // `${screenWidth}x${screenHeight}`
+    value: GridCalibration;
+  };
 }
 
 const DB_NAME = "othellonia-inventory";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<OthelloniaDB>> | null = null;
 
@@ -41,6 +45,9 @@ export function getDb(): Promise<IDBPDatabase<OthelloniaDB>> {
         }
         if (!db.objectStoreNames.contains("scanHistory")) {
           db.createObjectStore("scanHistory", { keyPath: "scanId" });
+        }
+        if (!db.objectStoreNames.contains("gridCalibrations")) {
+          db.createObjectStore("gridCalibrations", { keyPath: "id" });
         }
         if (!db.objectStoreNames.contains("meta")) {
           db.createObjectStore("meta", { keyPath: "key" });
@@ -121,6 +128,20 @@ export async function getMeta(key: string): Promise<string | undefined> {
 export async function setMeta(key: string, value: string): Promise<void> {
   const db = await getDb();
   await db.put("meta", { key, value });
+}
+
+export function gridCalibrationId(width: number, height: number): string {
+  return `${width}x${height}`;
+}
+
+export async function getGridCalibration(width: number, height: number): Promise<GridCalibration | undefined> {
+  const db = await getDb();
+  return db.get("gridCalibrations", gridCalibrationId(width, height));
+}
+
+export async function saveGridCalibration(calibration: GridCalibration): Promise<void> {
+  const db = await getDb();
+  await db.put("gridCalibrations", calibration);
 }
 
 export async function clearAllData(): Promise<void> {

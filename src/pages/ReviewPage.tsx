@@ -205,8 +205,14 @@ export function ReviewPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 {statusTag(r.reviewStatus)}
+                {r.cell.partial && <span className="tag tag-warning">画面端で一部のみ表示</span>}
                 <span className="muted">信頼度 {(r.confidence * 100).toFixed(0)}%</span>
               </div>
+              {r.cell.partial && (
+                <p className="muted" style={{ color: "var(--warning)" }}>
+                  この駒はスクリーンショットの下端で一部しか写っていません。別の画像で全体が写っている場合はそちらを優先してください。
+                </p>
+              )}
               <div style={{ fontWeight: 600, marginTop: 4 }}>
                 {r.assignedPieceId ? masterById.get(r.assignedPieceId)?.fullName ?? r.assignedPieceId : "未確定"}
               </div>

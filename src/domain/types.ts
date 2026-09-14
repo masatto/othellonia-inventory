@@ -96,6 +96,28 @@ export interface DetectedCell {
   aHash: string;
   colorHistogram: number[];
   thumbnailDataUrl: string;
+  /** 下部ナビゲーション等で行の一部しか写っていないセル（識別に使えるほど写っていない） */
+  partial: boolean;
+}
+
+/** 画面解像度ごとに端末内へ保存するグリッド調整値（仕様: 同じ画面サイズ用に保存） */
+export interface GridCalibration {
+  /** `${screenWidth}x${screenHeight}` 形式のキー */
+  id: string;
+  screenWidth: number;
+  screenHeight: number;
+  columns: number;
+  /** 1行目セル中心のY座標（px） */
+  gridTop: number;
+  /** 行間隔（px） */
+  rowPitch: number;
+  /** 各列の中心X座標（px） */
+  colCenters: number[];
+  /** 正方形切り出しの一辺の長さ（px） */
+  cellSize: number;
+  /** 下部ナビゲーションの上端Y座標（px）。これ以降は認識対象から除外する */
+  navBarTop: number;
+  updatedAt: string;
 }
 
 export interface RecognitionCandidate {

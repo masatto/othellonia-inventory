@@ -3,9 +3,7 @@ import { defaultGridConfigFor, type GridConfig } from "./gridDetection";
 import { judgeConfidence, rankCandidates } from "./matching";
 import { cellKey, detectScrollOverlap, type OverlapInputCell } from "./overlapDetection";
 import type { ImageProcessedResponse, ProcessedCell } from "../workers/recognitionWorker";
-
-/** iPhone Safariのメモリ制限を考慮し、長辺をこの値までに縮小してから処理する */
-const MAX_IMAGE_DIMENSION = 1600;
+import { loadDownscaledBitmap } from "./imageLoading";
 
 export interface PipelineImageInput {
   imageIndex: number;
@@ -30,19 +28,6 @@ export interface RunPipelineOptions {
   learnedFeatures: LearnedFeature[];
   onProgress?: (p: PipelineProgress) => void;
   signal?: AbortSignal;
-}
-
-async function loadDownscaledBitmap(file: File): Promise<ImageBitmap> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  if (scale >= 1) return bitmap;
-  const resized = await createImageBitmap(bitmap, {
-    resizeWidth: Math.round(bitmap.width * scale),
-    resizeHeight: Math.round(bitmap.height * scale),
-    resizeQuality: "medium",
-  });
-  bitmap.close();
-  return resized;
 }
 
 function processedCellToDetectedCell(imageIndex: number, cell: ProcessedCell): DetectedCell {

@@ -172,4 +172,12 @@ describe("validateAiResponseSchema", () => {
     const result = validateAiResponseSchema(payload);
     expect(result.ok).toBe(false);
   });
+
+  it("fullNameがnull(正式名称を特定できなかった)場合も受理する", () => {
+    const payload = validPayload();
+    (payload.pieces[0] as Record<string, unknown>).fullName = null;
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.pieces[0].fullName).toBeNull();
+  });
 });

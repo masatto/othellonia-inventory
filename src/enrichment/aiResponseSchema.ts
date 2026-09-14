@@ -63,8 +63,9 @@ const dateStringSchema = z
 export const aiPieceSchema = z.object({
   pieceId: safeString(100, 1),
   // 検索に使った名称と異なる正式名称が判明した場合はこちらに正しい名称を返す
-  // （完全一致は要求しない。ユーザーが差分画面で確認し、承認した場合のみ反映される）
-  fullName: safeString(NAME_MAX, 1),
+  // （完全一致は要求しない。ユーザーが差分画面で確認し、承認した場合のみ反映される）。
+  // 仮登録駒等で正式名称を特定できなかった場合はnullを許容する（現在の名称を維持する）
+  fullName: safeString(NAME_MAX, 1).nullable(),
   // 季節限定・コラボ版等のバージョン表記の候補（判別できない場合はnull）
   version: safeStringNullable(50).optional(),
   attribute: z.enum(["神", "魔", "竜"]).nullable(),

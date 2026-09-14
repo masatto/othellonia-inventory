@@ -76,6 +76,15 @@ describe("buildPieceDiff", () => {
     expect(diff.bulkEligible).toBe(false);
   });
 
+  it("fullNameがnull(正式名称を特定できなかった)場合、現在の名称をそのまま候補として据え置く", () => {
+    const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
+    const diff = buildPieceDiff(emptyExisting, aiPiece({ fullName: null }), knownDifferent);
+    expect(diff.nameCandidate.proposedFullName).toBe("［別の異名］テストピース");
+    expect(diff.nameCandidate.changed).toBe(false);
+    // 他フィールドの差分自体は通常どおり評価される
+    expect(diff.hasAnyChange).toBe(true);
+  });
+
   it("変更が無ければhasAnyChangeはfalseになる", () => {
     const existing: MergedPieceInfo = {
       ...emptyExisting,
@@ -120,5 +129,12 @@ describe("buildLocalMetadataFromAiPiece", () => {
     const metadata = buildLocalMetadataFromAiPiece(diff, "2026-09-14", true);
     expect(metadata.fullName).toBe("［架空の異名］テストピース");
     expect(metadata.version).toBe("季節限定");
+  });
+
+  it("fullNameがnullでacceptNameがtrueでも、現在の名称が維持される（nullで上書きされない）", () => {
+    const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
+    const diff = buildPieceDiff(emptyExisting, aiPiece({ fullName: null }), knownDifferent);
+    const metadata = buildLocalMetadataFromAiPiece(diff, "2026-09-14", true);
+    expect(metadata.fullName).toBe("［別の異名］テストピース");
   });
 });

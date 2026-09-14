@@ -76,15 +76,18 @@ export function buildPieceDiff(
   const existingVersion = existing.version ?? null;
 
   const proposedVersion = aiPiece.version ?? null;
-  const parsedProposed = parsePieceName(aiPiece.fullName);
+  // AIが正式名称を特定できなかった場合(null)は、現在の名称を候補として据え置く
+  // （何も提案しない＝現在の名称のまま、として扱う。決してnullを表示・保存しない）
+  const proposedFullName = aiPiece.fullName ?? registeredFullName;
+  const parsedProposed = parsePieceName(proposedFullName);
   const nameCandidate: NameCandidate = {
     currentFullName: registeredFullName,
-    proposedFullName: aiPiece.fullName,
+    proposedFullName,
     proposedEpithet: parsedProposed.epithet,
     proposedBaseName: parsedProposed.baseName,
     proposedVersion,
     proposedEvolutionType: aiPiece.evolutionType ?? null,
-    changed: aiPiece.fullName !== registeredFullName || proposedVersion !== existingVersion,
+    changed: proposedFullName !== registeredFullName || proposedVersion !== existingVersion,
   };
 
   const fields: FieldDiff[] = [
@@ -126,7 +129,7 @@ export function buildAllPieceDiffs(
     const existing = existingByPieceId.get(p.pieceId);
     const fallback: MergedPieceInfo = existing ?? {
       pieceId: p.pieceId,
-      fullName: knownPieces.get(p.pieceId) ?? p.fullName,
+      fullName: knownPieces.get(p.pieceId) ?? p.fullName ?? "（名称不明）",
       version: null,
       attribute: null,
       rarity: null,

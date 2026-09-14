@@ -1,11 +1,21 @@
 import { Link } from "react-router-dom";
+import { useMemo } from "react";
 import { useAppData } from "../state/AppDataContext";
+import { getMissingFields } from "../enrichment/mergePieceInfo";
 
 export function HomePage() {
-  const { loading, error, ownedPieces, needsReviewCount, latestScan, masterVersion } = useAppData();
+  const { loading, error, ownedPieces, needsReviewCount, latestScan, masterVersion, mergedInfoById } = useAppData();
 
   const totalOwned = ownedPieces.reduce((sum, p) => sum + p.quantity, 0);
   const distinctOwned = ownedPieces.filter((p) => p.ownedStatus !== "unknown").length;
+  const missingInfoCount = useMemo(
+    () =>
+      ownedPieces.filter((p) => {
+        const info = mergedInfoById.get(p.pieceId);
+        return info && getMissingFields(info).length > 0;
+      }).length,
+    [ownedPieces, mergedInfoById],
+  );
 
   return (
     <div className="screen">
@@ -42,6 +52,16 @@ export function HomePage() {
             要確認の駒を確認する
           </Link>
         )}
+      </div>
+
+      <div className="card">
+        <div className="muted">属性・スキル等が未補完の駒</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: missingInfoCount > 0 ? "var(--warning)" : undefined }}>
+          {missingInfoCount} 件
+        </div>
+        <Link className="btn btn-block" to="/enrichment" style={{ marginTop: 8 }}>
+          🔎 駒情報を補完する
+        </Link>
       </div>
 
       <div className="card">

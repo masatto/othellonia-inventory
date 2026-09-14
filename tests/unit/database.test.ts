@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addLearnedFeature,
   clearAllData,
+  deleteLocalPieceMetadata,
   deleteOwnedPiece,
   getAllLearnedFeatures,
+  getAllLocalPieceMetadata,
   getAllOwnedPieces,
+  getLocalPieceMetadata,
   getMeta,
+  putLocalPieceMetadata,
   putOwnedPiece,
   resetDbForTests,
   setMeta,
 } from "../../src/db/database";
-import type { OwnedPiece } from "../../src/domain/types";
+import type { LocalPieceMetadata, OwnedPiece } from "../../src/domain/types";
 
 function makeOwned(pieceId: string): OwnedPiece {
   const now = new Date().toISOString();
@@ -80,8 +84,47 @@ describe("IndexedDBデータ層", () => {
       colorHistogram: [1, 0],
       createdAt: new Date().toISOString(),
     });
+    await putLocalPieceMetadata(makeLocalMetadata("sd001"));
     await clearAllData();
     expect(await getAllOwnedPieces()).toHaveLength(0);
     expect(await getAllLearnedFeatures()).toHaveLength(0);
+    expect(await getAllLocalPieceMetadata()).toHaveLength(0);
+  });
+
+  it("駒情報補完データを保存・取得・削除できる", async () => {
+    await putLocalPieceMetadata(makeLocalMetadata("sd001"));
+    expect(await getLocalPieceMetadata("sd001")).toMatchObject({ pieceId: "sd001", attribute: "竜" });
+    expect(await getAllLocalPieceMetadata()).toHaveLength(1);
+
+    await deleteLocalPieceMetadata("sd001");
+    expect(await getLocalPieceMetadata("sd001")).toBeUndefined();
+  });
+
+  it("同じpieceIdで保存すると上書きされる", async () => {
+    await putLocalPieceMetadata(makeLocalMetadata("sd001"));
+    await putLocalPieceMetadata({ ...makeLocalMetadata("sd001"), rarity: "S" });
+    const all = await getAllLocalPieceMetadata();
+    expect(all).toHaveLength(1);
+    expect(all[0].rarity).toBe("S");
   });
 });
+
+function makeLocalMetadata(pieceId: string): LocalPieceMetadata {
+  return {
+    schemaVersion: 1,
+    pieceId,
+    fullName: "［架空の異名］テストピース",
+    attribute: "竜",
+    rarity: "S+",
+    evolutionType: "進化",
+    hp: null,
+    attack: null,
+    skill: { name: null, type: "攻撃力アップ", condition: null, effect: null, value: "1.5倍" },
+    comboSkillStatus: "none",
+    comboSkill: null,
+    sourceUrls: [],
+    checkedAt: "2026-09-14",
+    importedAt: new Date().toISOString(),
+    verificationStatus: "user_confirmed",
+  };
+}

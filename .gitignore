@@ -46,6 +46,14 @@ test-artifacts/
 othellonia-inventory-backup*.json
 backup-*.json
 
+# 駒情報補完機能: AIから返された実データ・取込用JSON・個人用の補完済み駒マスター
+# （すべて端末内IndexedDBにのみ保存する想定。開発中に手元へ書き出した場合の誤コミット防止）
+ai-response*.json
+enrichment-import*.json
+local-metadata*.json
+*.enrichment.json
+ai-consult-history*.json
+
 # 秘密情報
 .env
 .env.*

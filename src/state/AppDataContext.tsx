@@ -1,16 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { OwnedPiece, PieceMaster, ScanHistoryRecord } from "../domain/types";
+import type { LocalPieceMetadata, MergedPieceInfo, OwnedPiece, PieceMaster, ScanHistoryRecord } from "../domain/types";
 import {
   clearAllData,
   deleteOwnedPiece as dbDeleteOwnedPiece,
+  getAllLocalPieceMetadata,
   getAllOwnedPieces,
   getLatestScanHistory,
   getMeta,
+  putLocalPieceMetadata,
   putOwnedPiece,
   setMeta,
 } from "../db/database";
 import { fetchAllPieceMaster, fetchManifest, fetchOwnedSeed } from "../master/masterLoader";
 import { MASTER_DATA_VERSION_KEY } from "../domain/types";
+import { mergePieceInfo } from "../enrichment/mergePieceInfo";
 
 interface AppDataContextValue {
   loading: boolean;
@@ -22,10 +25,15 @@ interface AppDataContextValue {
   latestScan: ScanHistoryRecord | null;
   masterVersion: string;
   needsReviewCount: number;
+  localMetadata: LocalPieceMetadata[];
+  localMetadataById: Map<string, LocalPieceMetadata>;
+  mergedInfoById: Map<string, MergedPieceInfo>;
   refreshOwnedPieces: () => Promise<void>;
   refreshLatestScan: () => Promise<void>;
+  refreshLocalMetadata: () => Promise<void>;
   upsertOwnedPiece: (piece: OwnedPiece) => Promise<void>;
   deleteOwnedPiece: (pieceId: string) => Promise<void>;
+  upsertLocalMetadata: (metadata: LocalPieceMetadata) => Promise<void>;
   resetAllData: () => Promise<void>;
 }
 
@@ -38,6 +46,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [ownedPieces, setOwnedPieces] = useState<OwnedPiece[]>([]);
   const [latestScan, setLatestScan] = useState<ScanHistoryRecord | null>(null);
   const [masterVersion, setMasterVersion] = useState("");
+  const [localMetadata, setLocalMetadata] = useState<LocalPieceMetadata[]>([]);
 
   const refreshOwnedPieces = useCallback(async () => {
     setOwnedPieces(await getAllOwnedPieces());
@@ -45,6 +54,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const refreshLatestScan = useCallback(async () => {
     setLatestScan((await getLatestScanHistory()) ?? null);
+  }, []);
+
+  const refreshLocalMetadata = useCallback(async () => {
+    setLocalMetadata(await getAllLocalPieceMetadata());
   }, []);
 
   useEffect(() => {
@@ -83,6 +96,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setOwnedPieces(owned);
         setLatestScan((await getLatestScanHistory()) ?? null);
+        setLocalMetadata(await getAllLocalPieceMetadata());
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -108,14 +122,32 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setOwnedPieces((prev) => prev.filter((p) => p.pieceId !== pieceId));
   }, []);
 
+  const upsertLocalMetadata = useCallback(async (metadata: LocalPieceMetadata) => {
+    await putLocalPieceMetadata(metadata);
+    setLocalMetadata((prev) => {
+      const next = prev.filter((m) => m.pieceId !== metadata.pieceId);
+      next.push(metadata);
+      return next;
+    });
+  }, []);
+
   const resetAllData = useCallback(async () => {
     await clearAllData();
     setOwnedPieces([]);
     setLatestScan(null);
+    setLocalMetadata([]);
   }, []);
 
   const masterById = useMemo(() => new Map(masterPieces.map((p) => [p.pieceId, p])), [masterPieces]);
   const ownedById = useMemo(() => new Map(ownedPieces.map((p) => [p.pieceId, p])), [ownedPieces]);
+  const localMetadataById = useMemo(() => new Map(localMetadata.map((m) => [m.pieceId, m])), [localMetadata]);
+  const mergedInfoById = useMemo(() => {
+    const map = new Map<string, MergedPieceInfo>();
+    for (const master of masterPieces) {
+      map.set(master.pieceId, mergePieceInfo(master, localMetadataById.get(master.pieceId)));
+    }
+    return map;
+  }, [masterPieces, localMetadataById]);
   const needsReviewCount = useMemo(
     () => ownedPieces.filter((p) => p.ownedStatus === "needs_review").length,
     [ownedPieces],
@@ -131,10 +163,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     latestScan,
     masterVersion,
     needsReviewCount,
+    localMetadata,
+    localMetadataById,
+    mergedInfoById,
     refreshOwnedPieces,
     refreshLatestScan,
+    refreshLocalMetadata,
     upsertOwnedPiece,
     deleteOwnedPiece,
+    upsertLocalMetadata,
     resetAllData,
   };
 

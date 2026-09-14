@@ -1,5 +1,12 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { OwnedPiece, LearnedFeature, ScanHistoryRecord, AppMeta, GridCalibration } from "../domain/types";
+import type {
+  OwnedPiece,
+  LearnedFeature,
+  ScanHistoryRecord,
+  AppMeta,
+  GridCalibration,
+  LocalPieceMetadata,
+} from "../domain/types";
 
 interface OthelloniaDB extends DBSchema {
   ownedPieces: {
@@ -24,10 +31,14 @@ interface OthelloniaDB extends DBSchema {
     key: string; // `${screenWidth}x${screenHeight}`
     value: GridCalibration;
   };
+  localPieceMetadata: {
+    key: string; // pieceId
+    value: LocalPieceMetadata;
+  };
 }
 
 const DB_NAME = "othellonia-inventory";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise: Promise<IDBPDatabase<OthelloniaDB>> | null = null;
 
@@ -48,6 +59,9 @@ export function getDb(): Promise<IDBPDatabase<OthelloniaDB>> {
         }
         if (!db.objectStoreNames.contains("gridCalibrations")) {
           db.createObjectStore("gridCalibrations", { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains("localPieceMetadata")) {
+          db.createObjectStore("localPieceMetadata", { keyPath: "pieceId" });
         }
         if (!db.objectStoreNames.contains("meta")) {
           db.createObjectStore("meta", { keyPath: "key" });
@@ -144,14 +158,38 @@ export async function saveGridCalibration(calibration: GridCalibration): Promise
   await db.put("gridCalibrations", calibration);
 }
 
+export async function getAllLocalPieceMetadata(): Promise<LocalPieceMetadata[]> {
+  const db = await getDb();
+  return db.getAll("localPieceMetadata");
+}
+
+export async function getLocalPieceMetadata(pieceId: string): Promise<LocalPieceMetadata | undefined> {
+  const db = await getDb();
+  return db.get("localPieceMetadata", pieceId);
+}
+
+export async function putLocalPieceMetadata(metadata: LocalPieceMetadata): Promise<void> {
+  const db = await getDb();
+  await db.put("localPieceMetadata", metadata);
+}
+
+export async function deleteLocalPieceMetadata(pieceId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete("localPieceMetadata", pieceId);
+}
+
 export async function clearAllData(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction(["ownedPieces", "learnedFeatures", "scanHistory", "meta"], "readwrite");
+  const tx = db.transaction(
+    ["ownedPieces", "learnedFeatures", "scanHistory", "meta", "localPieceMetadata"],
+    "readwrite",
+  );
   await Promise.all([
     tx.objectStore("ownedPieces").clear(),
     tx.objectStore("learnedFeatures").clear(),
     tx.objectStore("scanHistory").clear(),
     tx.objectStore("meta").clear(),
+    tx.objectStore("localPieceMetadata").clear(),
   ]);
   await tx.done;
 }

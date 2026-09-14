@@ -1,4 +1,5 @@
-import type { OwnedPiece, PieceMaster } from "../domain/types";
+import type { MergedPieceInfo, OwnedPiece } from "../domain/types";
+import { getMissingFields } from "../enrichment/mergePieceInfo";
 
 export type ConsultGoal =
   | "手持ちでデッキを組みたい"
@@ -15,14 +16,13 @@ export type ConsultGoal =
 export interface ConsultRequest {
   goal: ConsultGoal;
   freeText: string;
-  /** 相談対象に絞り込む所持駒（未指定なら全件） */
+  /** 相談対象に絞り込む所持駒（未指定なら過去申告のみを除く全件） */
   targetPieceIds: string[] | null;
 }
 
 export interface ConsultEntry {
   pieceId: string;
   fullName: string;
-  epithet: string | null;
   attribute: string;
   evolutionType: string;
   rarity: string;
@@ -30,37 +30,51 @@ export interface ConsultEntry {
   skillLevel: number | null;
   skillSummary: string | null;
   comboSkillSummary: string | null;
+  checkedAt: string | null;
+  ownedStatus: string;
+  /** 属性・形態・スキル等が未補完の場合true */
+  isIncomplete: boolean;
   memo: string;
 }
 
-function summarizeSkill(name: string | null): string | null {
-  return name;
+function summarizeSkillDetail(skill: MergedPieceInfo["skill"]): string | null {
+  if (!skill) return null;
+  const parts = [skill.type, skill.condition, skill.effect, skill.value != null ? String(skill.value) : null].filter(
+    Boolean,
+  );
+  return parts.length > 0 ? parts.join(" / ") : skill.name;
 }
 
+/**
+ * 過去申告のみ(declared_only)の駒は、確認済みの所持駒と混同しないよう
+ * AI相談の初期選択から除外する（仕様書）。targetPieceIdsを明示した場合はそちらを優先する。
+ */
 export function buildConsultEntries(
   owned: OwnedPiece[],
-  masterById: Map<string, PieceMaster>,
+  mergedInfoById: Map<string, MergedPieceInfo>,
   targetPieceIds: string[] | null,
 ): ConsultEntry[] {
   const filtered = targetPieceIds
     ? owned.filter((o) => targetPieceIds.includes(o.pieceId))
-    : owned.filter((o) => o.ownedStatus !== "unknown");
+    : owned.filter((o) => o.ownedStatus !== "unknown" && o.ownedStatus !== "declared_only");
 
   const entries: ConsultEntry[] = [];
   for (const o of filtered) {
-    const master = masterById.get(o.pieceId);
-    if (!master) continue;
+    const info = mergedInfoById.get(o.pieceId);
+    if (!info) continue;
     entries.push({
       pieceId: o.pieceId,
-      fullName: master.fullName,
-      epithet: master.epithet,
-      attribute: master.attribute,
-      evolutionType: master.evolutionType,
-      rarity: master.rarity,
+      fullName: info.fullName,
+      attribute: info.attribute ?? "不明",
+      evolutionType: info.evolutionType ?? "不明",
+      rarity: info.rarity ?? "不明",
       quantity: o.quantity,
       skillLevel: o.skillLevel,
-      skillSummary: summarizeSkill(master.skillName),
-      comboSkillSummary: summarizeSkill(master.comboSkillName),
+      skillSummary: summarizeSkillDetail(info.skill),
+      comboSkillSummary: info.comboSkillStatus === "none" ? "なし" : summarizeSkillDetail(info.comboSkill),
+      checkedAt: info.checkedAt,
+      ownedStatus: o.ownedStatus,
+      isIncomplete: getMissingFields(info).length > 0,
       memo: o.memo,
     });
   }
@@ -108,6 +122,9 @@ export function consultDocumentToMarkdown(doc: ConsultDocument): string {
     lines.push(`  スキルレベル: ${e.skillLevel ?? "不明"}`);
     if (e.skillSummary) lines.push(`  スキル概要: ${e.skillSummary}`);
     if (e.comboSkillSummary) lines.push(`  コンボスキル概要: ${e.comboSkillSummary}`);
+    lines.push(`  情報確認日: ${e.checkedAt ?? "未確認"}`);
+    lines.push(`  確認状態: ${e.ownedStatus}`);
+    if (e.isIncomplete) lines.push(`  属性・形態・スキル情報は未補完`);
     if (e.memo) lines.push(`  メモ: ${e.memo}`);
     lines.push("");
   }

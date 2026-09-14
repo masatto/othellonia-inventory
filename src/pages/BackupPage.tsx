@@ -2,16 +2,17 @@ import { useRef, useState } from "react";
 import { useAppData } from "../state/AppDataContext";
 import { createBackup, migrateBackup } from "../backup/backupSchema";
 import { downloadTextFile } from "../backup/shareUtils";
-import { putOwnedPiece } from "../db/database";
+import { putOwnedPiece, putLocalPieceMetadata } from "../db/database";
 
 export function BackupPage() {
-  const { ownedPieces, masterVersion, refreshOwnedPieces, resetAllData } = useAppData();
+  const { ownedPieces, masterVersion, localMetadata, refreshOwnedPieces, refreshLocalMetadata, resetAllData } =
+    useAppData();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [lastExportedAt, setLastExportedAt] = useState<string | null>(null);
 
   function handleExport() {
-    const backup = createBackup(ownedPieces, masterVersion);
+    const backup = createBackup(ownedPieces, masterVersion, localMetadata);
     downloadTextFile(
       `othellonia-inventory-backup-${new Date().toISOString().slice(0, 10)}.json`,
       JSON.stringify(backup, null, 2),
@@ -25,13 +26,17 @@ export function BackupPage() {
     try {
       const text = await file.text();
       const raw = JSON.parse(text);
-      const { ownedPieces: restored, warnings } = migrateBackup(raw);
+      const { ownedPieces: restored, localPieceMetadata: restoredMetadata, warnings } = migrateBackup(raw);
       for (const piece of restored) {
         await putOwnedPiece(piece);
       }
+      for (const metadata of restoredMetadata) {
+        await putLocalPieceMetadata(metadata);
+      }
       await refreshOwnedPieces();
+      await refreshLocalMetadata();
       setMessage(
-        `復元しました（${restored.length}件）。${warnings.length > 0 ? "警告: " + warnings.join(" / ") : ""}`,
+        `復元しました（所持駒${restored.length}件 / 補完情報${restoredMetadata.length}件）。${warnings.length > 0 ? "警告: " + warnings.join(" / ") : ""}`,
       );
     } catch (e) {
       setMessage(`復元に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
@@ -68,7 +73,9 @@ export function BackupPage() {
           💾 JSONバックアップを保存
         </button>
         {lastExportedAt && <p className="muted">前回のエクスポート: {new Date(lastExportedAt).toLocaleString("ja-JP")}</p>}
-        <p className="muted">対象件数: {ownedPieces.length} 件 / マスターバージョン: {masterVersion}</p>
+        <p className="muted">
+          対象件数: 所持駒 {ownedPieces.length} 件 / 補完情報 {localMetadata.length} 件 / マスターバージョン: {masterVersion}
+        </p>
       </div>
 
       <div className="card">

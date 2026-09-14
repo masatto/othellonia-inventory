@@ -2,15 +2,20 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppData } from "../state/AppDataContext";
 import { searchPiecesByName } from "../master/masterLoader";
-import type { Attribute, EvolutionType, OwnedPiece, OwnedStatus, Rarity } from "../domain/types";
+import { getMissingFields } from "../enrichment/mergePieceInfo";
+import type {
+  EnrichmentAttribute,
+  EnrichmentEvolutionType,
+  OwnedPiece,
+  OwnedStatus,
+} from "../domain/types";
 
-const ATTRIBUTES: Attribute[] = ["神", "魔", "竜", "不明"];
-const EVOLUTIONS: EvolutionType[] = ["初期", "進化", "闘化", "神化", "真化", "覚醒", "不明"];
-const RARITIES: Rarity[] = ["S+", "S", "UR", "LR", "SR", "R", "N", "不明"];
+const ATTRIBUTES: EnrichmentAttribute[] = ["神", "魔", "竜"];
+const EVOLUTIONS: EnrichmentEvolutionType[] = ["初期", "進化", "闘化", "神化", "真化", "覚醒"];
 
 export function InventoryPage() {
   const navigate = useNavigate();
-  const { masterPieces, masterById, ownedPieces, upsertOwnedPiece, deleteOwnedPiece } = useAppData();
+  const { masterPieces, mergedInfoById, ownedPieces, upsertOwnedPiece, deleteOwnedPiece } = useAppData();
   const [query, setQuery] = useState("");
   const [attrFilter, setAttrFilter] = useState<string>("");
   const [rarityFilter, setRarityFilter] = useState<string>("");
@@ -20,21 +25,29 @@ export function InventoryPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
 
+  const rarityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const info of mergedInfoById.values()) {
+      if (info.rarity) set.add(info.rarity);
+    }
+    return [...set].sort();
+  }, [mergedInfoById]);
+
   const rows = useMemo(() => {
     return ownedPieces
-      .map((owned) => ({ owned, master: masterById.get(owned.pieceId) }))
-      .filter((r) => r.master)
+      .map((owned) => ({ owned, info: mergedInfoById.get(owned.pieceId) }))
+      .filter((r) => r.info)
       .filter((r) => {
-        const m = r.master!;
-        if (query && !m.fullName.toLowerCase().includes(query.toLowerCase())) return false;
-        if (attrFilter && m.attribute !== attrFilter) return false;
-        if (rarityFilter && m.rarity !== rarityFilter) return false;
-        if (evoFilter && m.evolutionType !== evoFilter) return false;
+        const info = r.info!;
+        if (query && !info.fullName.toLowerCase().includes(query.toLowerCase())) return false;
+        if (attrFilter && info.attribute !== attrFilter) return false;
+        if (rarityFilter && info.rarity !== rarityFilter) return false;
+        if (evoFilter && info.evolutionType !== evoFilter) return false;
         if (statusFilter && r.owned.ownedStatus !== statusFilter) return false;
         return true;
       })
       .sort((a, b) => (a.owned.updatedAt < b.owned.updatedAt ? 1 : -1));
-  }, [ownedPieces, masterById, query, attrFilter, rarityFilter, evoFilter, statusFilter]);
+  }, [ownedPieces, mergedInfoById, query, attrFilter, rarityFilter, evoFilter, statusFilter]);
 
   const addCandidates = useMemo(() => {
     if (!addOpen) return [];
@@ -89,7 +102,7 @@ export function InventoryPage() {
           </select>
           <select value={rarityFilter} onChange={(e) => setRarityFilter(e.target.value)}>
             <option value="">ランク: すべて</option>
-            {RARITIES.map((r) => (
+            {rarityOptions.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
@@ -113,6 +126,9 @@ export function InventoryPage() {
         </div>
       </div>
 
+      <button className="btn btn-block" onClick={() => navigate("/enrichment")} style={{ marginBottom: 8 }}>
+        🔎 駒情報を補完（属性・ランク・スキル）
+      </button>
       <button className="btn btn-block" onClick={() => setAddOpen((v) => !v)}>
         ＋ 駒を手動追加
       </button>
@@ -142,17 +158,19 @@ export function InventoryPage() {
 
       <p className="muted">{rows.length} 件</p>
 
-      {rows.map(({ owned, master }) => (
+      {rows.map(({ owned, info }) => (
         <div key={owned.pieceId} className="card">
           <div
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
             onClick={() => setExpanded(expanded === owned.pieceId ? null : owned.pieceId)}
           >
             <div>
-              <div style={{ fontWeight: 600 }}>{master!.fullName}</div>
+              <div style={{ fontWeight: 600 }}>{info!.fullName}</div>
               <div className="muted">
-                {master!.attribute} / {master!.rarity} / {master!.evolutionType} / 所持数 {owned.quantity}
+                {info!.attribute ?? "不明"} / {info!.rarity ?? "不明"} / {info!.evolutionType ?? "不明"} / 所持数{" "}
+                {owned.quantity}
               </div>
+              {getMissingFields(info!).length > 0 && <span className="tag tag-warning">情報未補完</span>}
             </div>
             <StatusTag status={owned.ownedStatus} />
           </div>
@@ -192,22 +210,26 @@ export function InventoryPage() {
                 <textarea value={owned.memo} onChange={(e) => save({ memo: e.target.value }, owned)} rows={2} />
               </label>
               <div className="muted">最終更新: {new Date(owned.updatedAt).toLocaleString("ja-JP")}</div>
-              {master!.sourceUrl && (
-                <a href={master!.sourceUrl} target="_blank" rel="noreferrer">
+              <div className="muted">情報確認日: {info!.checkedAt ?? "未確認"}</div>
+              {info!.sourceUrls.length > 0 && (
+                <a href={info!.sourceUrls[0].url} target="_blank" rel="noreferrer">
                   出典ページを見る
                 </a>
               )}
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   className="btn"
                   onClick={() => navigate(`/consult?pieceId=${encodeURIComponent(owned.pieceId)}`)}
                 >
                   この駒でAI相談
                 </button>
+                <button className="btn" onClick={() => navigate(`/enrichment?pieceId=${encodeURIComponent(owned.pieceId)}`)}>
+                  情報を補完
+                </button>
                 <button
                   className="btn btn-danger"
                   onClick={async () => {
-                    if (confirm(`${master!.fullName} を所持駒一覧から削除しますか？`)) {
+                    if (confirm(`${info!.fullName} を所持駒一覧から削除しますか？`)) {
                       await deleteOwnedPiece(owned.pieceId);
                     }
                   }}

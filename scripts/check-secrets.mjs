@@ -45,6 +45,21 @@ if (envFiles.length > 0) {
   messages.push(`.env系ファイルがGit管理下にあります: ${envFiles.join(", ")}`);
 }
 
+// 駒情報補完機能: AIから返された実データ・取込用JSON・個人用の補完済み駒マスターが
+// 誤ってコミットされていないか（すべて端末内IndexedDBにのみ保存する設計のため）
+const ENRICHMENT_DATA_PATTERNS = [
+  /(^|\/)ai-response.*\.json$/i,
+  /(^|\/)enrichment-import.*\.json$/i,
+  /(^|\/)local-metadata.*\.json$/i,
+  /\.enrichment\.json$/i,
+  /(^|\/)ai-consult-history.*\.json$/i,
+];
+const enrichmentFiles = trackedFiles.filter((f) => ENRICHMENT_DATA_PATTERNS.some((p) => p.test(f)));
+if (enrichmentFiles.length > 0) {
+  failed = true;
+  messages.push(`AI補完データ・個人用データらしきファイルがGit管理下にあります: ${enrichmentFiles.join(", ")}`);
+}
+
 const filesToScan = [...new Set([...trackedFiles, ...listDistFiles()])].filter(
   (f) => !SKIP_FILES.has(f) && !SKIP_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext)),
 );

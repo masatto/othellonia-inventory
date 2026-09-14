@@ -166,4 +166,86 @@ export interface AppMeta {
 }
 
 export const MASTER_DATA_VERSION_KEY = "masterDataVersion";
-export const APP_DATA_SCHEMA_VERSION = 1;
+/** バックアップJSONのスキーマバージョン。v2で端末内補完データ(localPieceMetadata)を追加した。 */
+export const APP_DATA_SCHEMA_VERSION = 2;
+
+// ─────────────────────────────────────────────────────────────
+// 駒情報補完（AI調査プロンプト生成・JSON取込）
+// ─────────────────────────────────────────────────────────────
+
+/** 補完データにおける属性（"不明"という文字列ではなくnullで未確認を表す） */
+export type EnrichmentAttribute = "神" | "魔" | "竜";
+
+/** 補完データにおける形態（"不明"という文字列ではなくnullで未確認を表す） */
+export type EnrichmentEvolutionType = "初期" | "進化" | "闘化" | "神化" | "真化" | "覚醒";
+
+/** コンボスキルの確認状態。「未登録」と「存在しないことを確認済み」を区別する */
+export type ComboSkillStatus = "unknown" | "exists" | "none";
+
+export type VerificationStatus = "user_confirmed" | "needs_review";
+
+/** スキル効果を簡潔な事実情報として保持する（攻略記事の説明文をそのまま保存しない） */
+export interface SkillDetail {
+  name: string | null;
+  type: string | null;
+  condition: string | null;
+  effect: string | null;
+  value: string | number | null;
+}
+
+export interface SourceUrlEntry {
+  url: string;
+  title: string | null;
+}
+
+/**
+ * 端末内で保持する駒情報補完データ（IndexedDB: localPieceMetadata）。
+ * 公開される駒マスターJSON(public/master/*.json)とは別の、
+ * ユーザーがAI調査結果を取り込んで作る個人用データ。GitHubへは送信しない。
+ */
+export interface LocalPieceMetadata {
+  schemaVersion: 1;
+  pieceId: string;
+  fullName: string;
+
+  attribute: EnrichmentAttribute | null;
+  rarity: string | null;
+  evolutionType: EnrichmentEvolutionType | null;
+
+  hp: number | null;
+  attack: number | null;
+
+  skill: SkillDetail | null;
+
+  comboSkillStatus: ComboSkillStatus;
+  comboSkill: SkillDetail | null;
+
+  sourceUrls: SourceUrlEntry[];
+
+  checkedAt: string | null;
+  importedAt: string;
+  verificationStatus: VerificationStatus;
+}
+
+/** 不足判定の対象フィールド */
+export type MissingField = "attribute" | "rarity" | "evolutionType" | "skill" | "comboSkill";
+
+/**
+ * 駒マスターの初期値と端末内補完データを統合した表示用ビュー。
+ * 優先順位: 端末内補完データ → 公開マスターの初期値 → 不明(null)
+ */
+export interface MergedPieceInfo {
+  pieceId: string;
+  fullName: string;
+  attribute: EnrichmentAttribute | null;
+  rarity: string | null;
+  evolutionType: EnrichmentEvolutionType | null;
+  skill: SkillDetail | null;
+  comboSkillStatus: ComboSkillStatus;
+  comboSkill: SkillDetail | null;
+  sourceUrls: SourceUrlEntry[];
+  checkedAt: string | null;
+  verificationStatus: VerificationStatus | null;
+  /** 端末内補完データが存在するか（一度も調査していない場合false） */
+  hasLocalMetadata: boolean;
+}

@@ -8,6 +8,7 @@ import { ReviewPage } from "./pages/ReviewPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { ConsultPage } from "./pages/ConsultPage";
 import { BackupPage } from "./pages/BackupPage";
+import { EnrichmentPage } from "./pages/EnrichmentPage";
 import { UpdateNotifier } from "./components/UpdateNotifier";
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
               <Route path="/import" element={<ImportPage />} />
               <Route path="/review" element={<ReviewPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/enrichment" element={<EnrichmentPage />} />
               <Route path="/consult" element={<ConsultPage />} />
               <Route path="/backup" element={<BackupPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

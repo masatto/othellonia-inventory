@@ -9,6 +9,7 @@ import {
   type ConsultGoal,
 } from "../backup/aiExport";
 import { canUseWebShare, copyToClipboard, downloadTextFile, makeFile, shareFile } from "../backup/shareUtils";
+import { getMissingFields } from "../enrichment/mergePieceInfo";
 
 const GOALS: ConsultGoal[] = [
   "手持ちでデッキを組みたい",
@@ -26,7 +27,7 @@ const GOALS: ConsultGoal[] = [
 export function ConsultPage() {
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get("pieceId");
-  const { ownedPieces, masterById } = useAppData();
+  const { ownedPieces, mergedInfoById } = useAppData();
   const [goal, setGoal] = useState<ConsultGoal>("手持ちでデッキを組みたい");
   const [freeText, setFreeText] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string> | null>(
@@ -34,17 +35,20 @@ export function ConsultPage() {
   );
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
 
-  const eligiblePieces = useMemo(
-    () => ownedPieces.filter((p) => p.ownedStatus !== "unknown"),
-    [ownedPieces],
+  // 一覧には過去申告のみの駒も表示するが、確認済みの所持駒と混同しないよう
+  // AI相談の初期選択（デフォルトでチェックされる対象）からは除外する。
+  const eligiblePieces = useMemo(() => ownedPieces.filter((p) => p.ownedStatus !== "unknown"), [ownedPieces]);
+  const defaultSelectedIds = useMemo(
+    () => new Set(eligiblePieces.filter((p) => p.ownedStatus !== "declared_only").map((p) => p.pieceId)),
+    [eligiblePieces],
   );
 
-  const targetIds = selectedIds ? [...selectedIds] : null;
+  const targetIds = selectedIds ? [...selectedIds] : [...defaultSelectedIds];
 
   const entries = useMemo(
-    () => buildConsultEntries(ownedPieces, masterById, targetIds),
+    () => buildConsultEntries(ownedPieces, mergedInfoById, targetIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ownedPieces, masterById, selectedIds],
+    [ownedPieces, mergedInfoById, selectedIds, defaultSelectedIds],
   );
 
   const doc = useMemo(
@@ -58,7 +62,7 @@ export function ConsultPage() {
 
   function toggleSelection(pieceId: string) {
     setSelectedIds((prev) => {
-      const base = prev ?? new Set(eligiblePieces.map((p) => p.pieceId));
+      const base = prev ?? defaultSelectedIds;
       const next = new Set(base);
       if (next.has(pieceId)) next.delete(pieceId);
       else next.add(pieceId);
@@ -66,7 +70,7 @@ export function ConsultPage() {
     });
   }
 
-  const isSelected = (pieceId: string) => (selectedIds ? selectedIds.has(pieceId) : true);
+  const isSelected = (pieceId: string) => (selectedIds ? selectedIds.has(pieceId) : defaultSelectedIds.has(pieceId));
 
   async function handleShare() {
     const file = makeFile("othellonia-consult.md", markdown, "text/markdown");
@@ -114,14 +118,22 @@ export function ConsultPage() {
 
       <div className="card">
         <h2>相談対象の所持駒（{entries.length}件）</h2>
+        <p className="muted">過去申告のみの駒は初期状態でチェックが外れています。</p>
         <div style={{ maxHeight: 240, overflowY: "auto" }}>
           {eligiblePieces.map((p) => {
-            const master = masterById.get(p.pieceId);
-            if (!master) return null;
+            const info = mergedInfoById.get(p.pieceId);
+            if (!info) return null;
+            const incomplete = getMissingFields(info).length > 0;
             return (
               <label key={p.pieceId} style={{ display: "block", marginBottom: 4 }}>
                 <input type="checkbox" checked={isSelected(p.pieceId)} onChange={() => toggleSelection(p.pieceId)} />{" "}
-                {master.fullName}（所持数 {p.quantity}）
+                {info.fullName}（所持数 {p.quantity}）
+                {p.ownedStatus === "declared_only" && <span className="tag" style={{ marginLeft: 4 }}>過去申告</span>}
+                {incomplete && (
+                  <span className="tag tag-warning" style={{ marginLeft: 4 }}>
+                    未補完
+                  </span>
+                )}
               </label>
             );
           })}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBackup, migrateBackup } from "../../src/backup/backupSchema";
-import type { LocalPieceMetadata, OwnedPiece } from "../../src/domain/types";
+import type { LocalPieceMetadata, LocalPieceRecord, OwnedPiece } from "../../src/domain/types";
 
 const samplePiece: OwnedPiece = {
   pieceId: "sd001",
@@ -19,6 +19,7 @@ const sampleMetadata: LocalPieceMetadata = {
   schemaVersion: 1,
   pieceId: "sd001",
   fullName: "［架空の異名］テストピース",
+  version: null,
   attribute: "竜",
   rarity: "S+",
   evolutionType: "進化",
@@ -99,5 +100,46 @@ describe("backupSchema", () => {
     const json = JSON.stringify(backup);
     expect(json).not.toContain("data:image");
     expect(json).not.toContain("thumbnailDataUrl");
+  });
+
+  it("localPiecesが無い旧バックアップでも復元できる（v2->v3マイグレーション）", () => {
+    const { localPieces, warnings } = migrateBackup({
+      schemaVersion: 2,
+      ownedPieces: [samplePiece],
+    });
+    expect(localPieces).toEqual([]);
+    expect(warnings.length).toBe(0);
+  });
+
+  it("仮登録駒(localPieces)を含むバックアップを作成し、そのまま往復復元できる", () => {
+    const sampleLocalPiece: LocalPieceRecord = {
+      pieceId: "local-abc123",
+      provisionalName: "多分ジェンイーっぽい駒",
+      nameStatus: "provisional",
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:00.000Z",
+    };
+    const backup = createBackup([samplePiece], "seed-1", [sampleMetadata], [sampleLocalPiece]);
+    const json = JSON.parse(JSON.stringify(backup));
+    const { localPieces, warnings } = migrateBackup(json);
+    expect(localPieces).toHaveLength(1);
+    expect(localPieces[0].pieceId).toBe("local-abc123");
+    expect(localPieces[0].provisionalName).toBe("多分ジェンイーっぽい駒");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("不正な仮登録駒データ(HTMLタグ混入)は復元前に拒否し、警告付きでスキップする", () => {
+    const corrupted = {
+      pieceId: "local-xyz",
+      provisionalName: "<script>alert(1)</script>",
+      nameStatus: "provisional",
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:00.000Z",
+    };
+    const backup = createBackup([samplePiece], "seed-1", [], [corrupted as unknown as LocalPieceRecord]);
+    const json = JSON.parse(JSON.stringify(backup));
+    const { localPieces, warnings } = migrateBackup(json);
+    expect(localPieces).toHaveLength(0);
+    expect(warnings.length).toBeGreaterThan(0);
   });
 });

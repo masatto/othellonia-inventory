@@ -3,6 +3,7 @@ import type {
   EnrichmentAttribute,
   EnrichmentEvolutionType,
   LocalPieceMetadata,
+  LocalPieceRecord,
   MergedPieceInfo,
   MissingField,
   PieceMaster,
@@ -42,7 +43,10 @@ export function mergePieceInfo(master: PieceMaster, local: LocalPieceMetadata | 
   if (local) {
     return {
       pieceId: master.pieceId,
-      fullName: master.fullName,
+      // 正式名称の確定はユーザー確認後にのみ行われるため、ここではローカルの
+      // 保存値をそのまま採用してよい（未確認のAI候補は別途diff表示で扱う）
+      fullName: local.fullName,
+      version: local.version,
       attribute: local.attribute ?? normalizeAttribute(master.attribute),
       rarity: local.rarity ?? normalizeRarity(master.rarity),
       evolutionType: local.evolutionType ?? normalizeEvolutionType(master.evolutionType),
@@ -53,6 +57,7 @@ export function mergePieceInfo(master: PieceMaster, local: LocalPieceMetadata | 
       checkedAt: local.checkedAt,
       verificationStatus: local.verificationStatus,
       hasLocalMetadata: true,
+      isUserRegistered: false,
     };
   }
 
@@ -60,6 +65,7 @@ export function mergePieceInfo(master: PieceMaster, local: LocalPieceMetadata | 
   return {
     pieceId: master.pieceId,
     fullName: master.fullName,
+    version: null,
     attribute: normalizeAttribute(master.attribute),
     rarity: normalizeRarity(master.rarity),
     evolutionType: normalizeEvolutionType(master.evolutionType),
@@ -70,6 +76,52 @@ export function mergePieceInfo(master: PieceMaster, local: LocalPieceMetadata | 
     checkedAt: master.sourceUpdatedAt,
     verificationStatus: null,
     hasLocalMetadata: false,
+    isUserRegistered: false,
+  };
+}
+
+/**
+ * マスタ未登録の仮登録駒(LocalPieceRecord)の表示用ビューを組み立てる。
+ * 駒の同一性はpieceId(record.pieceId)で管理し、名称は検索用の仮称として扱う。
+ */
+export function mergeProvisionalPieceInfo(
+  record: LocalPieceRecord,
+  local: LocalPieceMetadata | undefined,
+): MergedPieceInfo {
+  const provisionalFullName = record.provisionalName ?? "（名称未確認の駒）";
+  if (local) {
+    return {
+      pieceId: record.pieceId,
+      fullName: local.fullName,
+      version: local.version,
+      attribute: local.attribute,
+      rarity: local.rarity,
+      evolutionType: local.evolutionType,
+      skill: local.skill,
+      comboSkillStatus: local.comboSkillStatus,
+      comboSkill: local.comboSkill,
+      sourceUrls: local.sourceUrls,
+      checkedAt: local.checkedAt,
+      verificationStatus: local.verificationStatus,
+      hasLocalMetadata: true,
+      isUserRegistered: true,
+    };
+  }
+  return {
+    pieceId: record.pieceId,
+    fullName: provisionalFullName,
+    version: null,
+    attribute: null,
+    rarity: null,
+    evolutionType: null,
+    skill: null,
+    comboSkillStatus: "unknown",
+    comboSkill: null,
+    sourceUrls: [],
+    checkedAt: null,
+    verificationStatus: null,
+    hasLocalMetadata: false,
+    isUserRegistered: true,
   };
 }
 

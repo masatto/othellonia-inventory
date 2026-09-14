@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getMissingFields, isInfoMissing, mergePieceInfo } from "../../src/enrichment/mergePieceInfo";
-import type { LocalPieceMetadata, PieceMaster } from "../../src/domain/types";
+import { getMissingFields, isInfoMissing, mergePieceInfo, mergeProvisionalPieceInfo } from "../../src/enrichment/mergePieceInfo";
+import type { LocalPieceMetadata, LocalPieceRecord, PieceMaster } from "../../src/domain/types";
 
 const master: PieceMaster = {
   pieceId: "sd001",
@@ -36,6 +36,7 @@ describe("mergePieceInfo", () => {
       schemaVersion: 1,
       pieceId: "sd001",
       fullName: master.fullName,
+      version: null,
       attribute: "竜",
       rarity: "S+",
       evolutionType: "進化",
@@ -71,6 +72,58 @@ describe("mergePieceInfo", () => {
     expect(merged.rarity).toBe("S");
     expect(merged.evolutionType).toBe("闘化");
     expect(merged.comboSkillStatus).toBe("exists");
+    expect(merged.isUserRegistered).toBe(false);
+  });
+});
+
+describe("mergeProvisionalPieceInfo", () => {
+  const record: LocalPieceRecord = {
+    pieceId: "local-abc123",
+    provisionalName: "多分ジェンイーっぽい駒",
+    nameStatus: "provisional",
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
+  };
+
+  it("補完データが無い場合、仮称を名称として使い情報はすべて不明になる", () => {
+    const merged = mergeProvisionalPieceInfo(record, undefined);
+    expect(merged.pieceId).toBe("local-abc123");
+    expect(merged.fullName).toBe("多分ジェンイーっぽい駒");
+    expect(merged.isUserRegistered).toBe(true);
+    expect(merged.hasLocalMetadata).toBe(false);
+    expect(isInfoMissing(merged)).toBe(true);
+  });
+
+  it("不明駒として保存した場合、プレースホルダー名称になる", () => {
+    const unknownRecord: LocalPieceRecord = { ...record, provisionalName: null, nameStatus: "unknown" };
+    const merged = mergeProvisionalPieceInfo(unknownRecord, undefined);
+    expect(merged.fullName).toBe("（名称未確認の駒）");
+  });
+
+  it("AI調査で承認済みの補完データがある場合、それを優先する", () => {
+    const local: LocalPieceMetadata = {
+      schemaVersion: 1,
+      pieceId: "local-abc123",
+      fullName: "［王家の護持］ジェンイー",
+      version: null,
+      attribute: "竜",
+      rarity: "S+",
+      evolutionType: "進化",
+      hp: null,
+      attack: null,
+      skill: null,
+      comboSkillStatus: "unknown",
+      comboSkill: null,
+      sourceUrls: [],
+      checkedAt: "2026-09-14",
+      importedAt: "2026-09-14T00:00:00.000Z",
+      verificationStatus: "user_confirmed",
+    };
+    const merged = mergeProvisionalPieceInfo(record, local);
+    expect(merged.fullName).toBe("［王家の護持］ジェンイー");
+    expect(merged.attribute).toBe("竜");
+    expect(merged.hasLocalMetadata).toBe(true);
+    expect(merged.isUserRegistered).toBe(true);
   });
 });
 
@@ -87,6 +140,7 @@ describe("getMissingFields / isInfoMissing", () => {
       schemaVersion: 1,
       pieceId: "sd001",
       fullName: master.fullName,
+      version: null,
       attribute: "竜",
       rarity: "S+",
       evolutionType: "進化",
@@ -110,6 +164,7 @@ describe("getMissingFields / isInfoMissing", () => {
       schemaVersion: 1,
       pieceId: "sd001",
       fullName: master.fullName,
+      version: null,
       attribute: "竜",
       rarity: "S+",
       evolutionType: "進化",

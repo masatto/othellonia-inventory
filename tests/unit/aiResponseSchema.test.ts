@@ -115,4 +115,25 @@ describe("validateAiResponseSchema", () => {
     const result = validateAiResponseSchema(payload);
     expect(result.ok).toBe(false);
   });
+
+  it("versionが省略されていても正常に検証できる", () => {
+    const result = validateAiResponseSchema(validPayload());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.pieces[0].version).toBeUndefined();
+  });
+
+  it("versionにバージョン表記の候補を指定できる", () => {
+    const payload = validPayload();
+    (payload.pieces[0] as Record<string, unknown>).version = "季節限定";
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.pieces[0].version).toBe("季節限定");
+  });
+
+  it("fullNameが登録名と完全一致しなくても拒否しない（名称の完全一致は要求しない）", () => {
+    const payload = validPayload({});
+    (payload.pieces[0] as Record<string, unknown>).fullName = "検索に使った適当な仮称";
+    const result = validateAiResponseSchema(payload);
+    expect(result.ok).toBe(true);
+  });
 });

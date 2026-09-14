@@ -41,6 +41,7 @@ describe("buildInvestigationPrompt", () => {
         existing: {
           pieceId: "sd001",
           fullName: "［架空］アルファ",
+          version: null,
           attribute: "竜",
           rarity: "S+",
           evolutionType: "進化",
@@ -51,12 +52,46 @@ describe("buildInvestigationPrompt", () => {
           checkedAt: "2026-09-01",
           verificationStatus: "user_confirmed",
           hasLocalMetadata: true,
+          isUserRegistered: false,
         },
       },
     ]);
     expect(prompt).toContain("現在保存されている情報");
     expect(prompt).toContain("1.8倍");
     expect(prompt).toContain("2026-09-01");
+  });
+
+  it("名称の完全一致を要求せず、正式名称の候補を返すよう明記する", () => {
+    const prompt = buildInvestigationPrompt([{ pieceId: "sd001", fullName: "［架空］アルファ" }]);
+    expect(prompt).toContain("完全に正確とは限りません");
+    expect(prompt).toContain("完全一致しなくてもかまわない");
+    expect(prompt).toContain("version");
+  });
+
+  it("仮登録駒の場合、fullNameが検索用の仮称であることを明記する", () => {
+    const prompt = buildInvestigationPrompt([
+      {
+        pieceId: "local-abc123",
+        fullName: "多分アルファっぽい駒",
+        existing: {
+          pieceId: "local-abc123",
+          fullName: "多分アルファっぽい駒",
+          version: null,
+          attribute: null,
+          rarity: null,
+          evolutionType: null,
+          skill: null,
+          comboSkillStatus: "unknown",
+          comboSkill: null,
+          sourceUrls: [],
+          checkedAt: null,
+          verificationStatus: null,
+          hasLocalMetadata: false,
+          isUserRegistered: true,
+        },
+      },
+    ]);
+    expect(prompt).toContain("ユーザーが入力した検索用の仮称です");
   });
 });
 

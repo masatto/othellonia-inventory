@@ -170,6 +170,7 @@ export function InventoryPage() {
                 {info!.attribute ?? "不明"} / {info!.rarity ?? "不明"} / {info!.evolutionType ?? "不明"} / 所持数{" "}
                 {owned.quantity}
               </div>
+              {info!.isUserRegistered && <span className="tag">仮登録駒</span>}
               {getMissingFields(info!).length > 0 && <span className="tag tag-warning">情報未補完</span>}
             </div>
             <StatusTag status={owned.ownedStatus} />

@@ -6,8 +6,11 @@ import { searchPiecesByName } from "../master/masterLoader";
 import { addLearnedFeature, getAllLearnedFeatures, putScanHistory } from "../db/database";
 import type { OwnedPiece, ReviewStatus, ScanHistoryRecord } from "../domain/types";
 import { getLatestScanHistory } from "../db/database";
+import { generateLocalPieceId } from "../domain/localPieceId";
 
 const MAX_LEARNED_SAMPLES_PER_PIECE = 5;
+/** この類似度以上の画像候補がある場合、新規仮登録の前に警告を表示する */
+const SIMILAR_IMAGE_WARNING_THRESHOLD = 0.6;
 
 function statusTag(status: ReviewStatus) {
   switch (status) {
@@ -27,9 +30,11 @@ function statusTag(status: ReviewStatus) {
 export function ReviewPage() {
   const navigate = useNavigate();
   const { pendingScan, setPendingScan, updateResult } = usePendingScan();
-  const { masterPieces, masterById, upsertOwnedPiece, ownedById, refreshLatestScan } = useAppData();
+  const { masterPieces, masterById, mergedInfoById, localPieces, upsertOwnedPiece, upsertLocalPiece, ownedById, refreshLatestScan } =
+    useAppData();
   const [searchOpenFor, setSearchOpenFor] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [provisionalName, setProvisionalName] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -89,6 +94,62 @@ export function ReviewPage() {
 
   function markUnknown(cellIndex: number) {
     updateResult(cellIndex, { reviewStatus: "unmatched", assignedPieceId: null });
+  }
+
+  /** 画像特徴量が既存の学習済み駒と似ている場合、仮登録前に警告して確認を取る */
+  function confirmDespiteSimilarImage(cellIndex: number): boolean {
+    const result = visibleResults.find((r) => r.cell.cellIndex === cellIndex);
+    const top = result?.candidates[0];
+    if (!top || top.score < SIMILAR_IMAGE_WARNING_THRESHOLD) return true;
+    const candidateName = mergedInfoById.get(top.pieceId)?.fullName ?? masterById.get(top.pieceId)?.fullName ?? top.pieceId;
+    return confirm(
+      `画像が「${candidateName}」と類似しています（類似度${Math.round(top.score * 100)}%）。同じ駒の可能性があります。\n` +
+        "それでも新しい駒として仮登録しますか？",
+    );
+  }
+
+  async function learnCellFeature(cellIndex: number, pieceId: string): Promise<void> {
+    const result = visibleResults.find((r) => r.cell.cellIndex === cellIndex);
+    if (!result) return;
+    await addLearnedFeature({
+      id: `${pieceId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      pieceId,
+      pHash: result.cell.pHash,
+      dHash: result.cell.dHash,
+      aHash: result.cell.aHash,
+      colorHistogram: result.cell.colorHistogram,
+      createdAt: new Date().toISOString(),
+      thumbnailDataUrl: result.cell.thumbnailDataUrl,
+    });
+  }
+
+  /** マスタに無い駒を、ユーザー入力の仮称付きで新しい内部pieceIdとして仮登録する */
+  async function registerProvisionalPiece(cellIndex: number) {
+    const name = provisionalName.trim();
+    if (!name) {
+      alert("仮の名称を入力してください。名称が分からない場合は「不明駒として保存」を使ってください。");
+      return;
+    }
+    if (!confirmDespiteSimilarImage(cellIndex)) return;
+
+    const pieceId = generateLocalPieceId();
+    const now = new Date().toISOString();
+    await upsertLocalPiece({ pieceId, provisionalName: name, nameStatus: "provisional", createdAt: now, updatedAt: now });
+    await learnCellFeature(cellIndex, pieceId);
+    assignPiece(cellIndex, pieceId);
+    setProvisionalName("");
+  }
+
+  /** 名称が分からない駒を、名称未確認のまま新しい内部pieceIdとして保存する */
+  async function registerUnknownNamePiece(cellIndex: number) {
+    if (!confirmDespiteSimilarImage(cellIndex)) return;
+
+    const pieceId = generateLocalPieceId();
+    const now = new Date().toISOString();
+    await upsertLocalPiece({ pieceId, provisionalName: null, nameStatus: "unknown", createdAt: now, updatedAt: now });
+    await learnCellFeature(cellIndex, pieceId);
+    assignPiece(cellIndex, pieceId);
+    setProvisionalName("");
   }
 
   function changeQuantity(cellIndex: number, quantity: number) {
@@ -186,6 +247,22 @@ export function ReviewPage() {
   const searchResults =
     searchOpenFor !== null ? searchPiecesByName(masterPieces, searchQuery).slice(0, 20) : [];
 
+  // 仮登録前の重複防止: 検索キーワードに近い名称の駒（マスタ・仮登録済みの両方）を警告表示する
+  const similarLocalPieces =
+    searchOpenFor !== null && provisionalName.trim()
+      ? localPieces
+          .filter((p) => p.provisionalName?.toLowerCase().includes(provisionalName.trim().toLowerCase()))
+          .slice(0, 5)
+      : [];
+  const similarMasterPieces =
+    searchOpenFor !== null && provisionalName.trim()
+      ? searchPiecesByName(masterPieces, provisionalName).slice(0, 5)
+      : [];
+
+  function pieceDisplayName(pieceId: string): string {
+    return mergedInfoById.get(pieceId)?.fullName ?? masterById.get(pieceId)?.fullName ?? pieceId;
+  }
+
   return (
     <div className="screen">
       <h1>認識結果</h1>
@@ -214,7 +291,7 @@ export function ReviewPage() {
                 </p>
               )}
               <div style={{ fontWeight: 600, marginTop: 4 }}>
-                {r.assignedPieceId ? masterById.get(r.assignedPieceId)?.fullName ?? r.assignedPieceId : "未確定"}
+                {r.assignedPieceId ? pieceDisplayName(r.assignedPieceId) : "未確定"}
               </div>
 
               {r.reviewStatus !== "auto_confirmed" && r.reviewStatus !== "user_confirmed" && (
@@ -226,7 +303,7 @@ export function ReviewPage() {
                       style={{ minHeight: 36, padding: "6px 10px", fontSize: 13 }}
                       onClick={() => assignPiece(r.cell.cellIndex, c.pieceId)}
                     >
-                      {masterById.get(c.pieceId)?.fullName ?? c.pieceId} ({(c.score * 100).toFixed(0)}%)
+                      {pieceDisplayName(c.pieceId)} ({(c.score * 100).toFixed(0)}%)
                     </button>
                   ))}
                 </div>
@@ -276,7 +353,59 @@ export function ReviewPage() {
                     ))}
                     {searchQuery && searchResults.length === 0 && <p className="muted">該当する駒がありません</p>}
                   </div>
-                  <button className="btn btn-block" onClick={() => setSearchOpenFor(null)}>
+
+                  <div className="card" style={{ marginTop: 8, borderColor: "var(--warning)" }}>
+                    <p className="muted">見つからない場合は、新しい駒として仮登録できます。</p>
+                    <input
+                      type="text"
+                      placeholder="仮の名称を入力（後でAI調査により正式名称に更新できます）"
+                      value={provisionalName}
+                      onChange={(e) => setProvisionalName(e.target.value)}
+                    />
+                    {(similarMasterPieces.length > 0 || similarLocalPieces.length > 0) && (
+                      <div style={{ marginTop: 6 }}>
+                        <p style={{ color: "var(--warning)" }}>
+                          類似の名称の駒が見つかりました。同じ駒でないか確認してください：
+                        </p>
+                        {similarMasterPieces.map((p) => (
+                          <button
+                            key={p.pieceId}
+                            className="btn btn-block"
+                            style={{ justifyContent: "flex-start", marginBottom: 4 }}
+                            onClick={() => assignPiece(r.cell.cellIndex, p.pieceId)}
+                          >
+                            {p.fullName}（マスタ登録駒）
+                          </button>
+                        ))}
+                        {similarLocalPieces.map((p) => (
+                          <button
+                            key={p.pieceId}
+                            className="btn btn-block"
+                            style={{ justifyContent: "flex-start", marginBottom: 4 }}
+                            onClick={() => assignPiece(r.cell.cellIndex, p.pieceId)}
+                          >
+                            {p.provisionalName}（仮登録済み）
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      className="btn btn-block"
+                      style={{ marginTop: 6 }}
+                      onClick={() => registerProvisionalPiece(r.cell.cellIndex)}
+                    >
+                      ＋ 新しい駒として仮登録
+                    </button>
+                    <button
+                      className="btn btn-block"
+                      style={{ marginTop: 6 }}
+                      onClick={() => registerUnknownNamePiece(r.cell.cellIndex)}
+                    >
+                      名称不明のまま「不明駒」として保存
+                    </button>
+                  </div>
+
+                  <button className="btn btn-block" style={{ marginTop: 8 }} onClick={() => setSearchOpenFor(null)}>
                     閉じる
                   </button>
                 </div>

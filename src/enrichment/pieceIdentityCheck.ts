@@ -1,27 +1,27 @@
 import type { AiPiece } from "./aiResponseSchema";
 
-export type IdentityCheckStatus = "ok" | "unknown_piece_id" | "name_mismatch";
+export type IdentityCheckStatus = "ok" | "unknown_piece_id";
 
 export interface IdentityCheckedPiece {
   status: IdentityCheckStatus;
   piece: AiPiece;
-  /** 端末内に登録されている正式名称（pieceIdが見つかった場合） */
+  /** 端末内に登録されている現在の名称（検索用の仮称の場合を含む。pieceIdが見つかった場合） */
   registeredFullName: string | null;
 }
 
 /**
- * AIが返したpieceIdが端末内に存在するか、fullNameが完全一致するかを検査する。
- * 「進化と闘化を混同」「同名の別バージョン」等を誤って自動反映しないための
- * 最終防衛ライン（仕様書「名称不一致」）。
+ * 駒の同一性は名称ではなく、アプリ内部で管理する一意なpieceIdでのみ判定する。
+ * AIが返したfullNameが現在の登録名（マスタの正式名称、または仮登録駒の仮称）と
+ * 完全一致するかどうかは同一性の判定に使わない（表記ゆれ・仮称からの正式化が
+ * 起こりうるため）。pieceId自体が端末内のどの駒にも対応しない場合のみ
+ * "unknown_piece_id"として要確認とする。名称候補としての比較は別途
+ * buildPieceDiffのnameCandidateで行い、必ずユーザー確認を経て反映する。
  */
 export function checkPieceIdentities(pieces: AiPiece[], knownPieces: Map<string, string>): IdentityCheckedPiece[] {
   return pieces.map((piece) => {
     const registeredFullName = knownPieces.get(piece.pieceId) ?? null;
     if (registeredFullName === null) {
       return { status: "unknown_piece_id", piece, registeredFullName: null };
-    }
-    if (registeredFullName !== piece.fullName) {
-      return { status: "name_mismatch", piece, registeredFullName };
     }
     return { status: "ok", piece, registeredFullName };
   });

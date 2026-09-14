@@ -166,8 +166,12 @@ export interface AppMeta {
 }
 
 export const MASTER_DATA_VERSION_KEY = "masterDataVersion";
-/** バックアップJSONのスキーマバージョン。v2で端末内補完データ(localPieceMetadata)を追加した。 */
-export const APP_DATA_SCHEMA_VERSION = 2;
+/**
+ * バックアップJSONのスキーマバージョン。
+ * v2で端末内補完データ(localPieceMetadata)を追加、
+ * v3でマスタ未登録駒の仮登録データ(localPieces)を追加した。
+ */
+export const APP_DATA_SCHEMA_VERSION = 3;
 
 // ─────────────────────────────────────────────────────────────
 // 駒情報補完（AI調査プロンプト生成・JSON取込）
@@ -207,6 +211,8 @@ export interface LocalPieceMetadata {
   schemaVersion: 1;
   pieceId: string;
   fullName: string;
+  /** 季節限定・コラボ版等のバージョン表記（AI調査結果の候補。未確認ならnull） */
+  version: string | null;
 
   attribute: EnrichmentAttribute | null;
   rarity: string | null;
@@ -237,6 +243,7 @@ export type MissingField = "attribute" | "rarity" | "evolutionType" | "skill" | 
 export interface MergedPieceInfo {
   pieceId: string;
   fullName: string;
+  version: string | null;
   attribute: EnrichmentAttribute | null;
   rarity: string | null;
   evolutionType: EnrichmentEvolutionType | null;
@@ -248,4 +255,27 @@ export interface MergedPieceInfo {
   verificationStatus: VerificationStatus | null;
   /** 端末内補完データが存在するか（一度も調査していない場合false） */
   hasLocalMetadata: boolean;
+  /** 公開マスターに存在しない、ユーザーが仮登録した駒かどうか */
+  isUserRegistered: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────
+// マスタ未登録駒の仮登録（画像取込レビュー画面から新規登録）
+// ─────────────────────────────────────────────────────────────
+
+/** "provisional"=ユーザーが仮の名称を入力した, "unknown"=名称不明のまま保存した */
+export type LocalPieceNameStatus = "provisional" | "unknown";
+
+/**
+ * マスタに存在しない駒をユーザーが仮登録した記録（IndexedDB: localPieces）。
+ * 公開マスターJSON(public/master/*.json)とは別に、内部で発行した一意なpieceIdで
+ * 管理する。駒の同一性は常にこのpieceIdで判定し、名称の一致では判定しない。
+ */
+export interface LocalPieceRecord {
+  pieceId: string;
+  /** ユーザーが検索の手がかりとして入力した仮の名称（不明駒の場合はnull） */
+  provisionalName: string | null;
+  nameStatus: LocalPieceNameStatus;
+  createdAt: string;
+  updatedAt: string;
 }

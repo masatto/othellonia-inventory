@@ -5,6 +5,7 @@ import type { MergedPieceInfo, OwnedPiece } from "../../src/domain/types";
 const mergedInfo: MergedPieceInfo = {
   pieceId: "sd025",
   fullName: "［王家の護持］ジェンイー",
+  version: null,
   attribute: "竜",
   rarity: "S+",
   evolutionType: "進化",
@@ -15,11 +16,13 @@ const mergedInfo: MergedPieceInfo = {
   checkedAt: "2026-09-01",
   verificationStatus: "user_confirmed",
   hasLocalMetadata: true,
+  isUserRegistered: false,
 };
 
 const declaredOnlyInfo: MergedPieceInfo = {
   pieceId: "sd999",
   fullName: "［過去申告］未確認駒",
+  version: null,
   attribute: null,
   rarity: null,
   evolutionType: null,
@@ -30,6 +33,7 @@ const declaredOnlyInfo: MergedPieceInfo = {
   checkedAt: null,
   verificationStatus: null,
   hasLocalMetadata: false,
+  isUserRegistered: false,
 };
 
 const owned: OwnedPiece = {

@@ -6,6 +6,7 @@ import type { MergedPieceInfo } from "../../src/domain/types";
 const emptyExisting: MergedPieceInfo = {
   pieceId: "sd001",
   fullName: "［架空の異名］テストピース",
+  version: null,
   attribute: null,
   rarity: null,
   evolutionType: null,
@@ -16,6 +17,7 @@ const emptyExisting: MergedPieceInfo = {
   checkedAt: null,
   verificationStatus: null,
   hasLocalMetadata: false,
+  isUserRegistered: false,
 };
 
 function aiPiece(overrides: Partial<AiPiece> = {}): AiPiece {
@@ -46,12 +48,20 @@ describe("buildPieceDiff", () => {
     expect(diff.bulkEligible).toBe(true);
   });
 
-  it("名称不一致の駒は一括反映の対象から除外される", () => {
+  it("名称が完全一致しなくても、pieceIdが一致すれば一括反映の対象になりうる（同一性は名称で判定しない）", () => {
     const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
     const diff = buildPieceDiff(emptyExisting, aiPiece(), knownDifferent);
-    expect(diff.identityStatus).toBe("name_mismatch");
-    expect(diff.bulkEligible).toBe(false);
-    expect(diff.reasonsExcludedFromBulk.length).toBeGreaterThan(0);
+    expect(diff.identityStatus).toBe("ok");
+    expect(diff.bulkEligible).toBe(true);
+  });
+
+  it("名称候補は現在の名称と異なる場合changedになるが、自動では反映されない", () => {
+    const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
+    const diff = buildPieceDiff(emptyExisting, aiPiece(), knownDifferent);
+    expect(diff.nameCandidate.currentFullName).toBe("［別の異名］テストピース");
+    expect(diff.nameCandidate.proposedFullName).toBe("［架空の異名］テストピース");
+    expect(diff.nameCandidate.proposedEpithet).toBe("架空の異名");
+    expect(diff.nameCandidate.changed).toBe(true);
   });
 
   it("端末内に存在しないpieceIdは一括反映の対象から除外される", () => {
@@ -84,12 +94,31 @@ describe("buildPieceDiff", () => {
 });
 
 describe("buildLocalMetadataFromAiPiece", () => {
+  const known = new Map([["sd001", "［架空の異名］テストピース"]]);
+
   it("承認されたAI回答からLocalPieceMetadataを構築する", () => {
-    const metadata = buildLocalMetadataFromAiPiece(aiPiece(), "2026-09-14");
+    const diff = buildPieceDiff(emptyExisting, aiPiece(), known);
+    const metadata = buildLocalMetadataFromAiPiece(diff, "2026-09-14", false);
     expect(metadata.pieceId).toBe("sd001");
     expect(metadata.attribute).toBe("竜");
     expect(metadata.verificationStatus).toBe("user_confirmed");
     expect(metadata.checkedAt).toBe("2026-09-14");
     expect(metadata.schemaVersion).toBe(1);
+  });
+
+  it("acceptNameがfalseの場合、名称・バージョンは現在の値を引き継ぐ", () => {
+    const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
+    const diff = buildPieceDiff(emptyExisting, aiPiece({ version: "季節限定" }), knownDifferent);
+    const metadata = buildLocalMetadataFromAiPiece(diff, "2026-09-14", false);
+    expect(metadata.fullName).toBe("［別の異名］テストピース");
+    expect(metadata.version).toBeNull();
+  });
+
+  it("acceptNameがtrueの場合、AI提案の名称・バージョンを採用する", () => {
+    const knownDifferent = new Map([["sd001", "［別の異名］テストピース"]]);
+    const diff = buildPieceDiff(emptyExisting, aiPiece({ version: "季節限定" }), knownDifferent);
+    const metadata = buildLocalMetadataFromAiPiece(diff, "2026-09-14", true);
+    expect(metadata.fullName).toBe("［架空の異名］テストピース");
+    expect(metadata.version).toBe("季節限定");
   });
 });

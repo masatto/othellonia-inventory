@@ -3,19 +3,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addLearnedFeature,
   clearAllData,
+  deleteLocalPiece,
   deleteLocalPieceMetadata,
   deleteOwnedPiece,
   getAllLearnedFeatures,
   getAllLocalPieceMetadata,
+  getAllLocalPieces,
   getAllOwnedPieces,
+  getLocalPiece,
   getLocalPieceMetadata,
   getMeta,
+  putLocalPiece,
   putLocalPieceMetadata,
   putOwnedPiece,
   resetDbForTests,
   setMeta,
 } from "../../src/db/database";
-import type { LocalPieceMetadata, OwnedPiece } from "../../src/domain/types";
+import type { LocalPieceMetadata, LocalPieceRecord, OwnedPiece } from "../../src/domain/types";
 
 function makeOwned(pieceId: string): OwnedPiece {
   const now = new Date().toISOString();
@@ -85,10 +89,12 @@ describe("IndexedDBデータ層", () => {
       createdAt: new Date().toISOString(),
     });
     await putLocalPieceMetadata(makeLocalMetadata("sd001"));
+    await putLocalPiece(makeLocalPiece("local-abc"));
     await clearAllData();
     expect(await getAllOwnedPieces()).toHaveLength(0);
     expect(await getAllLearnedFeatures()).toHaveLength(0);
     expect(await getAllLocalPieceMetadata()).toHaveLength(0);
+    expect(await getAllLocalPieces()).toHaveLength(0);
   });
 
   it("駒情報補完データを保存・取得・削除できる", async () => {
@@ -107,6 +113,15 @@ describe("IndexedDBデータ層", () => {
     expect(all).toHaveLength(1);
     expect(all[0].rarity).toBe("S");
   });
+
+  it("仮登録駒(localPieces)を保存・取得・削除できる", async () => {
+    await putLocalPiece(makeLocalPiece("local-abc"));
+    expect(await getLocalPiece("local-abc")).toMatchObject({ pieceId: "local-abc", nameStatus: "provisional" });
+    expect(await getAllLocalPieces()).toHaveLength(1);
+
+    await deleteLocalPiece("local-abc");
+    expect(await getLocalPiece("local-abc")).toBeUndefined();
+  });
 });
 
 function makeLocalMetadata(pieceId: string): LocalPieceMetadata {
@@ -114,6 +129,7 @@ function makeLocalMetadata(pieceId: string): LocalPieceMetadata {
     schemaVersion: 1,
     pieceId,
     fullName: "［架空の異名］テストピース",
+    version: null,
     attribute: "竜",
     rarity: "S+",
     evolutionType: "進化",
@@ -126,5 +142,15 @@ function makeLocalMetadata(pieceId: string): LocalPieceMetadata {
     checkedAt: "2026-09-14",
     importedAt: new Date().toISOString(),
     verificationStatus: "user_confirmed",
+  };
+}
+
+function makeLocalPiece(pieceId: string): LocalPieceRecord {
+  return {
+    pieceId,
+    provisionalName: "多分ジェンイーっぽい駒",
+    nameStatus: "provisional",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }

@@ -17,6 +17,7 @@ const JSON_SCHEMA_EXAMPLE = `{
     {
       "pieceId": "sd025",
       "fullName": "［王家の護持］ジェンイー",
+      "version": null,
       "attribute": "竜",
       "rarity": "S+",
       "evolutionType": "進化",
@@ -50,6 +51,7 @@ function existingInfoBlock(piece: PromptTargetPiece): string {
   if (piece.existing.skill?.value != null) lines.push(`  スキル倍率等: ${piece.existing.skill.value}`);
   if (piece.existing.attribute) lines.push(`  属性: ${piece.existing.attribute}`);
   if (piece.existing.rarity) lines.push(`  ランク: ${piece.existing.rarity}`);
+  if (piece.existing.version) lines.push(`  バージョン: ${piece.existing.version}`);
   if (piece.existing.checkedAt) lines.push(`  確認日: ${piece.existing.checkedAt}`);
   if (lines.length === 0) return "";
   return `  現在保存されている情報:\n${lines.join("\n")}\n  現在も同じ内容か確認し、変更があれば新しい値を返してください。\n`;
@@ -63,13 +65,23 @@ export function buildInvestigationPrompt(pieces: PromptTargetPiece[]): string {
   const targetLines = pieces
     .map((p) => {
       const existing = existingInfoBlock(p);
-      return `- pieceId: ${p.pieceId}\n  fullName: ${p.fullName}\n${existing}`;
+      const provisionalNote = p.existing?.isUserRegistered
+        ? "  ※fullNameはユーザーが入力した検索用の仮称です。正式名称ではない可能性があります。\n"
+        : "";
+      return `- pieceId: ${p.pieceId}\n  fullName: ${p.fullName}\n${provisionalNote}${existing}`;
     })
     .join("\n");
 
   return `以下の「逆転オセロニア」の駒について、現在確認できる公開情報をWeb検索してください。
 
 画像検索や画像解析は行わず、駒名を使ったテキスト検索だけで調査してください。
+
+対象駒のfullNameは、検索の手がかりとして登録している名称です。表記ゆれ・略称・
+ユーザー入力の仮称である可能性があり、完全に正確とは限りません。
+fullNameと完全一致しなくてもかまわないので、pieceIdの駒として最も可能性が高いものを
+調査し、正しいと考えられる正式名称をfullNameに、二つ名部分を含む表記のまま返してください。
+季節限定・コラボ版等のバージョンが判明した場合はversionに記載してください
+（判別できない場合はnull）。
 
 同名の別駒、進化前、進化、闘化、季節版、コラボ版を混同しないでください。
 不明な情報は推測せずnullにしてください。

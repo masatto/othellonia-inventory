@@ -15,7 +15,7 @@ type Step = "list" | "prompt" | "import" | "diff";
 export function EnrichmentPage() {
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get("pieceId");
-  const { ownedPieces, masterPieces, mergedInfoById, upsertLocalMetadata } = useAppData();
+  const { ownedPieces, mergedInfoById, upsertLocalMetadata } = useAppData();
 
   const [step, setStep] = useState<Step>("list");
   const [filterMode, setFilterMode] = useState<FilterMode>("missing");
@@ -28,6 +28,8 @@ export function EnrichmentPage() {
   const [diffs, setDiffs] = useState<PieceDiff[]>([]);
   const [checkedAt, setCheckedAt] = useState<string>("");
   const [approved, setApproved] = useState<Set<string>>(new Set());
+  /** 名称候補の採用は他フィールドの承認と独立して、必ず個別に確認・選択する */
+  const [nameAccepted, setNameAccepted] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
@@ -121,12 +123,14 @@ export function EnrichmentPage() {
       setImportError(validated.errors);
       return;
     }
-    const knownPieces = new Map(masterPieces.map((m) => [m.pieceId, m.fullName]));
+    // 駒の同一性はpieceIdでのみ判定する（マスタ登録駒・仮登録駒の両方を対象に含める）
+    const knownPieces = new Map(Array.from(mergedInfoById.entries()).map(([id, info]) => [id, info.fullName]));
     const nextDiffs = buildAllPieceDiffs(validated.data.pieces, mergedInfoById, knownPieces);
     setDiffs(nextDiffs);
     setCheckedAt(validated.data.checkedAt);
-    // 名称不一致・出典なし等が無く、かつ変更のある駒だけを初期選択する
+    // 出典なし等が無く、かつ変更のある駒だけを初期選択する（名称候補の採用は含めない）
     setApproved(new Set(nextDiffs.filter((d) => d.bulkEligible && d.hasAnyChange).map((d) => d.pieceId)));
+    setNameAccepted(new Set());
     setStep("diff");
   }
 
@@ -144,21 +148,37 @@ export function EnrichmentPage() {
     });
   }
 
+  /** 正式名称・バージョンの採用は、他フィールドの承認とは別に必ず個別に選択する */
+  function toggleNameAccepted(pieceId: string) {
+    setNameAccepted((prev) => {
+      const next = new Set(prev);
+      if (next.has(pieceId)) next.delete(pieceId);
+      else next.add(pieceId);
+      return next;
+    });
+  }
+
   function bulkApplyEligible() {
     setApproved(new Set(diffs.filter((d) => d.bulkEligible && d.hasAnyChange).map((d) => d.pieceId)));
+    // 名称候補の一括採用は行わない（正式名称の確定は必ず個別確認を経る）
   }
 
   async function saveApproved() {
     let count = 0;
     for (const diff of diffs) {
       if (!approved.has(diff.pieceId)) continue;
-      const metadata = buildLocalMetadataFromAiPiece(diff.aiPiece, checkedAt || new Date().toISOString().slice(0, 10));
+      const metadata = buildLocalMetadataFromAiPiece(
+        diff,
+        checkedAt || new Date().toISOString().slice(0, 10),
+        nameAccepted.has(diff.pieceId),
+      );
       await upsertLocalMetadata(metadata);
       count++;
     }
     setSaveMessage(`${count}件の補完情報を保存しました。`);
     setDiffs([]);
     setApproved(new Set());
+    setNameAccepted(new Set());
     setImportText("");
     setStep("list");
   }
@@ -263,10 +283,14 @@ export function EnrichmentPage() {
     return (
       <div className="screen">
         <h1>差分確認</h1>
-        <p className="muted">内容を確認し、反映する駒だけチェックしてから保存してください。保存するまで何も変更されません。</p>
+        <p className="muted">
+          内容を確認し、反映する駒だけチェックしてから保存してください。保存するまで何も変更されません。
+          駒の同一性はpieceIdで管理しており、名称の一致は要求しません。正式名称・バージョンの採用は
+          フィールドの承認とは別に、それぞれ個別に選んでください。
+        </p>
         <div className="card">
           <button className="btn" onClick={bulkApplyEligible}>
-            名称一致・出典ありの駒を一括選択
+            出典ありの駒を一括選択
           </button>
         </div>
         {diffs.map((diff) => (
@@ -277,13 +301,7 @@ export function EnrichmentPage() {
                 <div style={{ fontWeight: 600 }}>{diff.registeredFullName}</div>
                 {diff.identityStatus !== "ok" && (
                   <div className="card" style={{ borderColor: "var(--warning)", marginTop: 6 }}>
-                    <p className="muted">登録名: {diff.registeredFullName}</p>
-                    <p className="muted">AI返却名: {diff.aiFullName}</p>
-                    <p style={{ color: "var(--warning)" }}>
-                      {diff.identityStatus === "unknown_piece_id"
-                        ? "端末内に存在しないpieceIdのため要確認"
-                        : "名称が完全一致しないため要確認"}
-                    </p>
+                    <p style={{ color: "var(--warning)" }}>端末内に存在しないpieceIdのため要確認</p>
                   </div>
                 )}
                 {diff.reasonsExcludedFromBulk.length > 0 && (
@@ -291,6 +309,26 @@ export function EnrichmentPage() {
                     一括反映対象外: {diff.reasonsExcludedFromBulk.join(" / ")}
                   </p>
                 )}
+
+                <div className="card" style={{ marginTop: 6 }}>
+                  <p className="muted" style={{ marginBottom: 4 }}>
+                    名称候補（現在の名称は検索用の仮称の場合があります）
+                  </p>
+                  <p className="muted">現在の名称: {diff.nameCandidate.currentFullName}</p>
+                  <p>AI提案の正式名称: {diff.nameCandidate.proposedFullName}</p>
+                  <p className="muted">二つ名: {diff.nameCandidate.proposedEpithet ?? "なし"}</p>
+                  <p className="muted">バージョン: {diff.nameCandidate.proposedVersion ?? "情報なし"}</p>
+                  <p className="muted">進化形態: {diff.nameCandidate.proposedEvolutionType ?? "不明"}</p>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={nameAccepted.has(diff.pieceId)}
+                      onChange={() => toggleNameAccepted(diff.pieceId)}
+                    />
+                    この正式名称・バージョンを採用する（現在の名称を上書きします）
+                  </label>
+                </div>
+
                 <table style={{ width: "100%", marginTop: 8, fontSize: 13 }}>
                   <tbody>
                     {diff.fields.map((f) => (

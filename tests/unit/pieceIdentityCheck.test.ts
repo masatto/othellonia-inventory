@@ -30,17 +30,17 @@ describe("checkPieceIdentities", () => {
     expect(result.status).toBe("unknown_piece_id");
   });
 
-  it("fullNameが一致しない場合、名称不一致として検出する", () => {
+  it("fullNameが一致しなくても、pieceIdが存在すればokになる（同一性は名称で判定しない）", () => {
     const known = new Map([["sd001", "［別の異名］テストピース"]]);
     const [result] = checkPieceIdentities([piece()], known);
-    expect(result.status).toBe("name_mismatch");
+    expect(result.status).toBe("ok");
     expect(result.registeredFullName).toBe("［別の異名］テストピース");
   });
 
-  it("異名だけ違う場合も名称不一致として検出する", () => {
+  it("異名だけ違う場合もpieceIdが一致すればokになる", () => {
     const known = new Map([["sd001", "テストピース"]]);
     const [result] = checkPieceIdentities([piece({ fullName: "［架空の異名］テストピース" })], known);
-    expect(result.status).toBe("name_mismatch");
+    expect(result.status).toBe("ok");
   });
 });
 

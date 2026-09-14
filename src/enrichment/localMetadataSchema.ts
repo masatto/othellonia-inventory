@@ -10,6 +10,7 @@ export const localPieceMetadataSchema = z.object({
   schemaVersion: z.literal(1),
   pieceId: safeString(100, 1),
   fullName: safeString(200, 1),
+  version: safeString(50).nullable().optional().transform((v) => v ?? null),
   attribute: z.enum(["神", "魔", "竜"]).nullable(),
   rarity: safeString(20).nullable(),
   evolutionType: z.enum(["初期", "進化", "闘化", "神化", "真化", "覚醒"]).nullable(),
@@ -25,3 +26,18 @@ export const localPieceMetadataSchema = z.object({
 });
 
 export type ValidatedLocalPieceMetadata = z.infer<typeof localPieceMetadataSchema>;
+
+/**
+ * バックアップ復元時にマスタ未登録駒の仮登録データ(LocalPieceRecord)を検証する
+ * スキーマ。学習済み特徴量(learnedFeatures)自体はバックアップに含めないため、
+ * ここではID・仮称・状態のみを検証する。
+ */
+export const localPieceRecordSchema = z.object({
+  pieceId: safeString(100, 1),
+  provisionalName: safeString(200).nullable(),
+  nameStatus: z.enum(["provisional", "unknown"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type ValidatedLocalPieceRecord = z.infer<typeof localPieceRecordSchema>;
